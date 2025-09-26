@@ -1,6 +1,6 @@
-# Chinese to Vietnamese Game Text Translator
+# Chinese to Vietnamese Text Translator for Lengend of Mortal
 
-A specialized tool for translating game text from Chinese (Simplified) to Vietnamese, with a focus on maintaining consistent game terminology and natural language flow.
+A specialized tool for translating game text from Chinese (Simplified) to Vietnamese for Legend of Mortal, with a focus on maintaining consistent game terminology and natural language flow.
 
 ## Features
 
@@ -141,6 +141,34 @@ python src/main.py --mode translate --input-dir /path/to/input --output-dir /pat
 ### Improvement Mode
 ```bash
 python src/main.py --mode improve --input-dir /path/to/input --translated-dir /path/to/raw --output-dir /path/to/output
+```
+
+## Tool Usage
+
+The `tool/` scripts provide additional utilities for processing JSON files. These scripts now require input and output directories to be specified as command-line arguments.
+
+### 1. `create_grossary.py`
+
+Aggregates original and translated JSON files into a glossary.
+
+```bash
+python tool/create_grossary.py --src_folder /path/to/original_jsons --tgt_folder /path/to/translated_jsons --output_json /path/to/output_glossary.json --output_txt /path/to/output_glossary.txt
+```
+
+### 2. `filter_entries_by_category.py`
+
+Filters JSON entries into categories (e.g., 'Story', 'LegendInfo', 'Other') based on their 'Name' field.
+
+```bash
+python tool/filter_entries_by_category.py --src_folder /path/to/input_jsons --dst_base_folder /path/to/output_categorized_jsons
+```
+
+### 3. `filter_languages.py`
+
+Filters JSON files into language-specific folders based on their 'Language' field.
+
+```bash
+python tool/filter_languages.py --src_folder /path/to/input_jsons --dst_base_folder /path/to/output_language_filtered_jsons
 ```
 
 ## Output Structure

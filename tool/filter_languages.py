@@ -4,6 +4,7 @@
 import os
 import json
 import shutil
+import argparse
 
 def filter_json_by_language(src_folder: str, dst_base_folder: str):
     for filename in os.listdir(src_folder):
@@ -23,6 +24,12 @@ def filter_json_by_language(src_folder: str, dst_base_folder: str):
             print(f"Copied {filename} to {dst_folder}")
 
 if __name__ == "__main__":
-    src_folder = os.path.join(os.path.dirname(__file__), 'resources/originals/unfiltered/')
-    dst_base_folder = os.path.join(os.path.dirname(__file__), 'resources/originals/filtered')
-    filter_json_by_language(src_folder, dst_base_folder)
+    parser = argparse.ArgumentParser(description='Filter JSON files by language.')
+    parser.add_argument('--src_folder', type=str, required=True,
+                        help='Source folder containing original JSON files.')
+    parser.add_argument('--dst_base_folder', type=str, required=True,
+                        help='Destination base folder for language-filtered JSON files.')
+    
+    args = parser.parse_args()
+
+    filter_json_by_language(args.src_folder, args.dst_base_folder)

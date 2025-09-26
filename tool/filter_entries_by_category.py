@@ -4,6 +4,7 @@
 import os
 import json
 import shutil
+import argparse
 from typing import List
 
 def get_entry_categories(entries: List[dict]) -> set:
@@ -38,6 +39,12 @@ def filter_json_by_entry_category(src_folder: str, dst_base_folder: str):
                 print(f"Copied {filename} to {dst_folder}")
 
 if __name__ == "__main__":
-    src_folder = os.path.join(os.path.dirname(__file__), 'resources/originals/filtered/ChineseSimplified')
-    dst_base_folder = os.path.join(os.path.dirname(__file__), 'resources/originals/filtered/ChineseSimplified/filtered_by_entry_category')
-    filter_json_by_entry_category(src_folder, dst_base_folder)
+    parser = argparse.ArgumentParser(description='Filter JSON files by entry category.')
+    parser.add_argument('--src_folder', type=str, required=True,
+                        help='Source folder containing original JSON files.')
+    parser.add_argument('--dst_base_folder', type=str, required=True,
+                        help='Destination base folder for categorized JSON files.')
+    
+    args = parser.parse_args()
+
+    filter_json_by_entry_category(args.src_folder, args.dst_base_folder)

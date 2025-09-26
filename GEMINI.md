@@ -1,0 +1,73 @@
+# Project Overview
+
+This project is a specialized tool for translating game text from Chinese (Simplified) to Vietnamese. It focuses on maintaining consistent game terminology and natural language flow, offering features like glossary support, concurrent processing, and structured output formats.
+
+**Key Technologies:** Python
+
+# Building and Running
+
+## Setup
+
+1.  **Create `.env` file:** Copy the template and configure your API keys and other settings.
+    ```bash
+    cp .env.template .env
+    ```
+    Edit `.env` with your specific configurations, including `API_KEYS`, `GOOGLE_STUDIO_AI_LLM`, rate limiting, and directory paths.
+
+2.  **Install Dependencies:**
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+## Usage
+
+### Translation Mode
+
+Translates Chinese (Simplified) game text to Vietnamese.
+
+```bash
+python src/main.py --mode translate --input-dir /path/to/input --output-dir /path/to/output
+```
+
+### Improvement Mode
+
+Refines existing translations.
+
+```bash
+python src/main.py --mode improve --input-dir /path/to/input --translated-dir /path/to/raw --output-dir /path/to/output
+```
+
+## Tool Usage
+
+The `tool/` scripts provide additional utilities for processing JSON files. These scripts now require input and output directories to be specified as command-line arguments.
+
+### 1. `create_grossary.py`
+
+Aggregates original and translated JSON files into a glossary.
+
+```bash
+python tool/create_grossary.py --src_folder /path/to/original_jsons --tgt_folder /path/to/translated_jsons --output_json /path/to/output_glossary.json --output_txt /path/to/output_glossary.txt
+```
+
+### 2. `filter_entries_by_category.py`
+
+Filters JSON entries into categories (e.g., 'Story', 'LegendInfo', 'Other') based on their 'Name' field.
+
+```bash
+python tool/filter_entries_by_category.py --src_folder /path/to/input_jsons --dst_base_folder /path/to/output_categorized_jsons
+```
+
+### 3. `filter_languages.py`
+
+Filters JSON files into language-specific folders based on their 'Language' field.
+
+```bash
+python tool/filter_languages.py --src_folder /path/to/input_jsons --dst_base_folder /path/to/output_language_filtered_jsons
+```
+
+# Development Conventions
+
+*   **Language:** Python
+*   **Configuration:** Uses a `.env` file for environment-specific settings and `src/config.py` for application configuration.
+*   **Logging:** Includes a dedicated `src/logger.py` for structured logging.
+*   **Modularity:** The project is structured into distinct modules for file processing, glossary management, prompt preparation, and translation engine interfacing.
