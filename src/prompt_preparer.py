@@ -63,13 +63,13 @@ def prepare_prompt_data(original_file_path, translated_dir=None):
         if raw_translation:
             # Template for improving existing translation
             prompt = []
-            prompt.append("""Bạn là một chuyên gia dịch thuật từ Tiếng Trung (Giản thể) sang Tiếng Việt. Nhiệm vụ của bạn là:
+            prompt.append("""Bạn là một chuyên gia hiệu chỉnh văn bản đã dịch từ Tiếng Trung (Giản thể) sang Tiếng Việt. Nhiệm vụ của bạn là:
 1. Cải thiện bản dịch hiện có dựa trên văn bản gốc.
 2. Đảm bảo câu văn tự nhiên, mượt mà và đúng ngữ pháp.
 3. Tự động phát hiện và viết hoa đúng các danh từ riêng (tên người, địa danh, tổ chức, v.v.).
 4. Giữ nguyên ý nghĩa ban đầu. Không thêm giải thích.
-5. Duy trì phong cách kiếm hiệp.
-6. Giữ nguyên các kí hiệu đánh dấu đặc biệt như [|], [||], ???, ???, {{title}}, [{{0}}], v.v.
+5. Văn phong bản dịch theo phong cách kiếm hiệp.
+6. Giữ nguyên các kí hiệu đánh dấu đặc biệt như [|], [||], ???, ???, {{title}}, [{{0}}], ……。 và các ký hiệu khác.
 7. Đối với cụm từ ngắn (1-2 chữ), cần xem xét bối cảnh game và ưu tiên dịch theo nghĩa hành động/trạng thái thay vì nghĩa sự vật (ví dụ: "整装" nên dịch là "chuẩn bị" thay vì "toàn bộ vũ khí").
 8. Chỉ trả về phần văn bản đã được cải thiện.""")
             if glossary_matches:
@@ -86,8 +86,8 @@ def prepare_prompt_data(original_file_path, translated_dir=None):
 1. Làm cho câu văn trở nên tự nhiên, mượt mà và đúng ngữ pháp.
 2. Tự động phát hiện và viết hoa đúng các danh từ riêng (tên người, địa danh, tổ chức, v.v.).
 3. Giữ nguyên ý nghĩa ban đầu. Không thêm giải thích.
-4. Phong cách kiếm hiệp.
-5. Giữ nguyên các kí hiệu đánh dấu đặc biệt như [|], [||], ???, ???, {title}, [{0}], v.v.
+4. Văn phong bản dịch theo phong cách kiếm hiệp.
+5. Giữ nguyên các kí hiệu đánh dấu đặc biệt như [|], [||], ???, ???, {{title}}, [{{0}}], ……。 và các ký hiệu khác
 6. Trong trường hợp văn bản gốc chỉ có dấu đặc biệt hoặc rỗng, trả về y hệt.
 7. Đối với cụm từ ngắn (1-2 chữ), cần xem xét bối cảnh game và ưu tiên dịch theo nghĩa hành động/trạng thái thay vì nghĩa sự vật (ví dụ: "整装" nên dịch là "chuẩn bị" thay vì "toàn bộ vũ khí").
 8. Chỉ trả về phần văn bản đã được dịch.""")
@@ -107,7 +107,7 @@ def prepare_prompt_data(original_file_path, translated_dir=None):
             'prompt': '\n'.join(prompt)
         })
 
-    return prompt_data
+    return prompt_data, translated_file
 
 def prepare_all_files(original_dir, translated_dir=None):
     """

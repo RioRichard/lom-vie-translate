@@ -53,11 +53,19 @@ def main():
         help='Directory containing existing translations (required for improve mode)'
     )
 
+    parser.add_argument(
+        '--old-version-dir',
+        help='Directory containing old version translations for reuse (optional)'
+    )
+
     args = parser.parse_args()
 
     # Validate arguments and directories
     if args.mode == 'improve' and not args.translated_dir:
         parser.error("--translated-dir is required when using --mode=improve")
+    # Allow translated_dir in translate mode for checking old translations
+    if args.mode == 'translate' and args.translated_dir:
+        logger.info(f"Using existing translations directory for lookup: {args.translated_dir}")
 
     json_dir = Path(args.input_dir)
     if not json_dir.exists():
@@ -70,6 +78,12 @@ def main():
         translated_dir = Path(args.translated_dir)
         if not translated_dir.exists():
             parser.error(f"Translated directory does not exist: {translated_dir}")
+
+    old_version_dir = None
+    if args.old_version_dir:
+        old_version_dir = Path(args.old_version_dir)
+        if not old_version_dir.exists():
+            parser.error(f"Old version directory does not exist: {old_version_dir}")
 
     # Setup output directories
     base_output_dir = Path(args.output_dir)
@@ -93,6 +107,8 @@ def main():
     logger.info(f"Pairs output directory: {pairs_output_dir}")
     if translated_dir:
         logger.info(f"Existing translations directory: {translated_dir}")
+    if old_version_dir:
+        logger.info(f"Old version translations directory: {old_version_dir}")
 
     run_start = time.time()
 
@@ -107,7 +123,8 @@ def main():
             translation_pairs=translation_pairs,
             mode=args.mode,
             translated_dir=translated_dir,
-            json_output_dir=json_output_dir
+            json_output_dir=json_output_dir,
+            old_version_dir=old_version_dir
         )
 
     # Save consolidated JSON with full translation details
