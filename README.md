@@ -171,6 +171,14 @@ Filters JSON files into language-specific folders based on their 'Language' fiel
 python tool/filter_languages.py --src_folder /path/to/input_jsons --dst_base_folder /path/to/output_language_filtered_jsons
 ```
 
+### 4. `convert_translation_details.py`
+
+Converts old `translation_details.json` files (dictionary format) to the new list format.
+
+```bash
+python tool/convert_translation_details.py --input_file /path/to/old_translation_details.json --output_file /path/to/new_translation_details.json
+```
+
 ## Output Structure
 
 The tool generates three types of output:
