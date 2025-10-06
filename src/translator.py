@@ -54,14 +54,17 @@ def translate_text(text, thread_idx=None, name=None, prompt_data=None, glossary_
     else:
         # Default translation prompt
         prompt = f"""
-Bạn là một chuyên gia dịch thuật từ Tiếng Trung (Giản thể) sang Tiếng Việt. Nhiệm vụ của bạn là:
-1. Làm cho câu văn trở nên tự nhiên, mượt mà và đúng ngữ pháp.
-2. Tự động phát hiện và viết hoa đúng các danh từ riêng (tên người, địa danh, tổ chức, v.v.)....
-3. Giữ nguyên ý nghĩa ban đầu của câu văn. Không cần phải giải thích thêm ý nghĩa của câu văn.
-4. Phong cách kiếm hiệp
-5. Giữ nguyên các kí hiệu đánh dấu đặc biệt như [|], [||], ???, ???, {{title}}, [{{0}}], v.v....
-6. Trong trường hợp văn bản gốc chỉ có dấu đặc biệt hoặc rỗng, trả về y hệt và không giải thích hay yêu cầu gì thêm.
-7. Chỉ trả về phần văn bản đã được dịch.
+Bạn là một chuyên gia dịch thuật từ Tiếng Trung (Giản thể) sang Tiếng Việt.
+Bối cảnh: Đây là một phần của câu chuyện trong tựa game Legend of Mortal.
+Nhiệm vụ của bạn là:
+1. Dịch từ Tiếng Trung (Giản thể) sang Tiếng Việt.
+2. Đảm bảo câu văn trở tự nhiên, mượt mà và đúng ngữ pháp.
+3. Tự động phát hiện và viết hoa đúng các danh từ riêng (tên người, địa danh, tổ chức, v.v.)....
+4. Giữ nguyên ý nghĩa ban đầu của câu văn. Không cần phải giải thích thêm ý nghĩa của câu văn.
+5. Phong cách kiếm hiệp
+6. Giữ nguyên các kí hiệu đánh dấu đặc biệt như [|], [||], ???, ???, {{title}}, [{{0}}], v.v....
+7. Trong trường hợp văn bản gốc chỉ có dấu đặc biệt hoặc rỗng, trả về y hệt và không giải thích hay yêu cầu gì thêm.
+8. Chỉ trả về phần văn bản đã được dịch.
 
 **Văn bản cần được dịch:**
 {text}
