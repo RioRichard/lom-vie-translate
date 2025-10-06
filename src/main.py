@@ -54,8 +54,8 @@ def main():
     )
 
     parser.add_argument(
-        '--old-version-dir',
-        help='Directory containing old version translations for reuse (optional)'
+        '--glossary-file',
+        help='Path to a specific glossary file (.json or .txt) to use (optional)'
     )
 
     args = parser.parse_args()
@@ -79,12 +79,6 @@ def main():
         if not translated_dir.exists():
             parser.error(f"Translated directory does not exist: {translated_dir}")
 
-    old_version_dir = None
-    if args.old_version_dir:
-        old_version_dir = Path(args.old_version_dir)
-        if not old_version_dir.exists():
-            parser.error(f"Old version directory does not exist: {old_version_dir}")
-
     # Setup output directories
     base_output_dir = Path(args.output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
@@ -98,7 +92,7 @@ def main():
     for dir_path in [json_output_dir, details_output_dir, pairs_output_dir]:
         dir_path.mkdir(parents=True, exist_ok=True)
 
-    all_data_dict = {}
+    all_data_dict = []
 
     logger.info(f"Starting translation in {args.mode} mode")
     logger.info(f"Input directory: {json_dir}")
@@ -107,8 +101,6 @@ def main():
     logger.info(f"Pairs output directory: {pairs_output_dir}")
     if translated_dir:
         logger.info(f"Existing translations directory: {translated_dir}")
-    if old_version_dir:
-        logger.info(f"Old version translations directory: {old_version_dir}")
 
     run_start = time.time()
 
@@ -124,7 +116,7 @@ def main():
             mode=args.mode,
             translated_dir=translated_dir,
             json_output_dir=json_output_dir,
-            old_version_dir=old_version_dir
+            glossary_file_path=args.glossary_file
         )
 
     # Save consolidated JSON with full translation details

@@ -13,9 +13,9 @@ def load_entries(json_path):
         entries_list = entries
     return entries_list
 
-def map_translation_context(json_path):
+def map_translation_context(json_path, glossary_file_path=None):
     entries = load_entries(json_path)
-    name_to_translated, original_to_translated = load_grossary()
+    name_to_translated, original_to_translated = load_grossary(glossary_file_path)
     mapped = []
     for entry in entries:
         original_text = entry.get('value') or entry.get('Text', '')
@@ -28,11 +28,11 @@ def map_translation_context(json_path):
         })
     return mapped
 
-def map_all_files():
+def map_all_files(glossary_file_path=None):
     json_dir = Path(INPUT_DIR)
     all_mapped = {}
     for file_path in json_dir.glob('*.json'):
-        all_mapped[file_path.name] = map_translation_context(file_path)
+        all_mapped[file_path.name] = map_translation_context(file_path, glossary_file_path)
     return all_mapped
 
 # Example usage:

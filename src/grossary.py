@@ -4,49 +4,73 @@ from pathlib import Path
 from src.config import GROSSARY_DIR
 from src.logger import logger
 
-def load_grossary():
-    """Load glossary data from JSON files
+def load_grossary(glossary_file_path=None):
+    """Load glossary data from JSON or TXT files.
+
+    Args:
+        glossary_file_path (str, optional): Absolute path to a specific glossary file (.json or .txt).
 
     Returns:
         Tuple of (name_to_translated, original_to_translated) dictionaries
 
     Raises:
-        FileNotFoundError: If glossary directory doesn't exist
-        json.JSONDecodeError: If a glossary file is invalid JSON
+        FileNotFoundError: If glossary directory doesn't exist or specified file not found.
+        json.JSONDecodeError: If a glossary JSON file is invalid.
     """
     name_to_translated = {}
     original_to_translated = {}
 
-    grossary_path = Path(GROSSARY_DIR)
-    if not grossary_path.exists():
-        raise FileNotFoundError(f"Glossary directory not found: {GROSSARY_DIR}")
+    files_to_process = []
 
-    json_files = list(grossary_path.glob('*.json'))
-    if not json_files:
-        logger.warning(f"No glossary files found in {GROSSARY_DIR}")
-        return name_to_translated, original_to_translated
+    if glossary_file_path:
+        file_path = Path(glossary_file_path)
+        if not file_path.exists():
+            raise FileNotFoundError(f"Glossary file not found: {glossary_file_path}")
+        files_to_process.append(file_path)
+    else:
+        grossary_path = Path(GROSSARY_DIR)
+        if not grossary_path.exists():
+            raise FileNotFoundError(f"Glossary directory not found: {GROSSARY_DIR}")
+        files_to_process.extend(list(grossary_path.glob('*.json')))
+        if not files_to_process:
+            logger.warning(f"No glossary files found in {GROSSARY_DIR}")
+            return name_to_translated, original_to_translated
 
-    for file in json_files:
+    for file in files_to_process:
         try:
-            with open(file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+            if file.suffix == '.json':
+                with open(file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
 
-            if isinstance(data, list):
-                for entry in data:
-                    name = entry.get('Name', '').strip()
-                    original = entry.get('Original', '').strip()
-                    translated = entry.get('Translated', '').strip()
+                if isinstance(data, list):
+                    for entry in data:
+                        name = entry.get('Name', '').strip()
+                        original = entry.get('Original', '').strip()
+                        translated = entry.get('Translated', '').strip()
 
-                    if name and translated:
-                        name_to_translated[name] = translated
-                    if original and translated:
-                        original_to_translated[original] = translated
+                        if name and translated:
+                            name_to_translated[name] = translated
+                        if original and translated:
+                            original_to_translated[original] = translated
 
-            elif isinstance(data, dict):
-                # fallback for dict format
-                for k, v in data.items():
-                    if k.strip() and str(v).strip():
-                        name_to_translated[k.strip()] = str(v).strip()
+                elif isinstance(data, dict):
+                    # fallback for dict format
+                    for k, v in data.items():
+                        if k.strip() and str(v).strip():
+                            name_to_translated[k.strip()] = str(v).strip()
+
+            elif file.suffix == '.txt':
+                with open(file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if '=' in line:
+                            original, translated = line.split('=', 1)
+                            original = original.strip()
+                            translated = translated.strip()
+                            if original and translated:
+                                original_to_translated[original] = translated
+                                # For TXT, we don't have a 'Name' field, so we'll use original for name_to_translated if needed
+                                name_to_translated[original] = translated
 
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in glossary file {file}: {str(e)}")

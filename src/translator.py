@@ -27,7 +27,7 @@ def get_model():
     genai.configure(api_key=next_api_key)
     return genai.GenerativeModel(GOOGLE_STUDIO_AI_LLM, generation_config=generation_config), next_api_key, api_index
 
-def translate_text(text, thread_idx=None, name=None, prompt_data=None):
+def translate_text(text, thread_idx=None, name=None, prompt_data=None, glossary_file_path=None):
     from src.utils import postprocess_text, special_chars
     from src.grossary import load_grossary, get_translated_by_name, find_original_matches
 
@@ -38,7 +38,7 @@ def translate_text(text, thread_idx=None, name=None, prompt_data=None):
 
     # If no prompt_data provided, fall back to basic glossary lookup
     if not prompt_data:
-        name_to_translated, original_to_translated = load_grossary()
+        name_to_translated, original_to_translated = load_grossary(glossary_file_path)
         if name:
             grossary_result = get_translated_by_name(name, name_to_translated)
             if grossary_result:
@@ -66,9 +66,9 @@ Bạn là một chuyên gia dịch thuật từ Tiếng Trung (Giản thể) san
 **Văn bản cần được dịch:**
 {text}
 """
+    logger.debug(f"Using prompt:\n{prompt}")
     max_retries = len(API_KEYS)
     retries = 0
-    logger.debug(f"Using prompt:\n{prompt}")
     while retries < max_retries:
         try:
             model, api_key, api_index = get_model()

@@ -194,15 +194,16 @@ Maintains the original structure with translated text:
 ### 2. Translation Details (translation_details.json)
 Consolidated file containing all translations:
 ```json
-{
-    "Story/Chapter1/Dialog001": {
-        "original": "你托人送了信，自己独行下山，加紧脚步往江陵发进。",
-        "final": "Ngươi phái người đưa thư, tự mình độc hành xuống núi, thúc ngựa lao về Giang Lăng.",
-        "raw": "Ngươi sai người đưa thư, mình độc hành xuống núi, gấp rút bước chân hướng Giang Lăng phát tiến."
+[
+    {
+        "Name": "Story/Chapter1/Dialog001",
+        "Original": "你托人送了信，自己独行下山，加紧脚步往江陵发进。",
+        "Translated": "Ngươi phái người đưa thư, tự mình độc hành xuống núi, thúc ngựa lao về Giang Lăng.",
+        "Raw": "Ngươi sai người đưa thư, mình độc hành xuống núi, gấp rút bước chân hướng Giang Lăng phát tiến."
     }
-}
+]
 ```
-Note: The "raw" field is only present in improve mode.
+Note: The "Raw" field is only present in improve mode.
 
 ### 3. Translation Pairs (translation_pairs.txt)
 Simple text file with original=translation pairs:

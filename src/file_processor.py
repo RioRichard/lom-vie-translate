@@ -7,48 +7,9 @@ from src.prompt_preparer import prepare_prompt_data
 from src.config import RATE_LIMIT_DELAY, MAX_CONCURRENT, INPUT_DIR, OUTPUT_DIR
 from src.logger import logger
 
-def load_old_version_translations(file_name, old_version_dir):
-    """Loads translations from an old version's file into a dictionary mapping original text to translated text.
 
-    Args:
-        file_name (str): The name of the current JSON file (e.g., 'story.json').
-        old_version_dir (Path): The directory containing the old version's translated JSON files.
 
-    Returns:
-        dict: A dictionary where keys are original Chinese texts and values are their Vietnamese translations.
-              Returns an empty dictionary if the old file doesn't exist or an error occurs.
-    """
-    old_translation_map = {}
-    old_file_path = old_version_dir / file_name
-
-    if not old_file_path.exists():
-        logger.debug(f"Old version translated file not found: {old_file_path}")
-        return old_translation_map
-
-    try:
-        with open(old_file_path, 'r', encoding='utf-8') as f:
-            old_data = json.load(f)
-
-        entries = old_data.get('entries', [])
-        if isinstance(entries, dict) and 'Array' in entries:
-            entries_list = entries['Array']
-        else:
-            entries_list = entries
-
-        for entry in entries_list:
-            original_text = entry.get('Original', '').strip()  # Assuming 'Original' field exists in old translations
-            translated_text = entry.get('Text', '').strip()
-            if original_text and translated_text:
-                old_translation_map[original_text] = translated_text
-
-    except json.JSONDecodeError as e:
-        logger.error(f"Invalid JSON in old version translated file {old_file_path}: {str(e)}")
-    except Exception as e:
-        logger.error(f"Failed to load old version translations from {old_file_path}: {str(e)}", exc_info=True)
-
-    return old_translation_map
-
-def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, old_translation_map=None):
+def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, name_to_translated=None, original_to_translated=None):
     """Process a single entry for translation or improvement
 
     Args:
@@ -56,7 +17,8 @@ def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, ol
         thread_idx: Thread index for concurrent processing
         mode: 'translate' for fresh translation or 'improve' for improving existing translations
         prompt_data: Pre-prepared prompt data containing context and templates, including raw_translation for improve mode
-        old_translation_map (dict, optional): A map of original text to old translations for reuse.
+        name_to_translated (dict, optional): Glossary map from name to translated text.
+        original_to_translated (dict, optional): Glossary map from original text to translated text.
 
     Returns:
         dict: The processed entry with translated text
@@ -74,17 +36,23 @@ def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, ol
         logger.debug(f"Skipping empty text for entry: {name}")
         return entry
 
-    # Check if translation exists in old version and original text matches
-    if old_translation_map and original_text in old_translation_map:
-        translated_text = old_translation_map[original_text]
-        logger.info(f"Reusing old translation for '{name}': '{original_text}' -> '{translated_text}'")
-        return {
-            'Name': name,
-            'Text': translated_text
-        }
+    # Check for glossary match by Name and Original text
+    if name_to_translated and original_to_translated:
+        glossary_translated_by_name = name_to_translated.get(name)
+        glossary_translated_by_original = original_to_translated.get(original_text)
+
+        if glossary_translated_by_name and glossary_translated_by_original and glossary_translated_by_name == glossary_translated_by_original:
+            logger.info(f"Reusing glossary translation for '{name}': '{original_text}' -> '{glossary_translated_by_name}'")
+            return {
+                'Name': name,
+                'Text': glossary_translated_by_name
+            }
 
     # Start translation
     line_start = time.time()
+
+    logger.debug(f"Type of prompt_data in process_entry: {type(prompt_data)}")
+    logger.debug(f"Content of prompt_data in process_entry: {prompt_data}")
 
     translated_text = translate_text(
         text=original_text,
@@ -114,7 +82,7 @@ def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, ol
         'Text': translated_text
     }
 
-def process_json_file(file_path, all_data_dict, translation_pairs, mode='translate', translated_dir=None, json_output_dir=None, old_version_dir=None):
+def process_json_file(file_path, all_data_dict, translation_pairs, mode='translate', translated_dir=None, json_output_dir=None, glossary_file_path=None):
     """Process a JSON file for translation or improvement
 
     Args:
@@ -125,11 +93,13 @@ def process_json_file(file_path, all_data_dict, translation_pairs, mode='transla
         translated_dir: Directory containing existing translations (required for improve mode)
         json_output_dir: Directory for individual translated JSON files (defaults to OUTPUT_DIR/json)
         old_version_dir (Path, optional): Directory containing old version translations for reuse.
+        glossary_file_path (str, optional): Path to a specific glossary file to use.
 
     Raises:
         ValueError: If mode is invalid or if translated_dir is missing in improve mode
     """
     from src.config import VALID_MODES
+    from src.grossary import load_grossary
 
     if mode not in VALID_MODES:
         raise ValueError(f"Invalid mode: {mode}. Must be one of {VALID_MODES}")
@@ -144,14 +114,13 @@ def process_json_file(file_path, all_data_dict, translation_pairs, mode='transla
 
     logger.file_start(file_name)
 
-    old_translation_map = {}
-    if old_version_dir:
-        old_translation_map = load_old_version_translations(file_name, old_version_dir)
+    name_to_translated, original_to_translated = load_grossary(glossary_file_path)
 
     # Prepare prompts with appropriate templates and context
-    prompt_data_list = prepare_prompt_data(
+    prompt_data_list, old_translated_file_data = prepare_prompt_data(
         original_file_path=file_path,
-        translated_dir=translated_dir if mode == 'improve' else None
+        translated_dir=translated_dir if mode == 'improve' else None,
+        glossary_file_path=glossary_file_path
     )
     try:
         file_start = time.time()
@@ -181,12 +150,15 @@ def process_json_file(file_path, all_data_dict, translation_pairs, mode='transla
                 thread_idx=idx,
                 mode=mode,
                 prompt_data=prompt,
-                old_translation_map=old_translation_map
+                name_to_translated=name_to_translated,
+                original_to_translated=original_to_translated
             )
 
         # Create list of tasks with their corresponding prompts
         if len(prompt_data_list) != len(entries_list):
             logger.warning(f"Number of prompts ({len(prompt_data_list)}) doesn't match number of entries ({len(entries_list)})")
+            logger.debug(f"Entries list: {entries_list}")
+            logger.debug(f"Prompt data list: {prompt_data_list}")
 
         tasks = []
         for idx, entry in enumerate(entries_list):
@@ -215,10 +187,11 @@ def process_json_file(file_path, all_data_dict, translation_pairs, mode='transla
             final_text = entry.get('Text', '').strip()
 
             if name and original_text and final_text:
-                # Store in all_data_dict with full details
-                all_data_dict[name] = {
-                    'original': original_text,
-                    'final': final_text
+                # Create a dictionary for the current entry
+                entry_details = {
+                    'Name': name,
+                    'Original': original_text,
+                    'Translated': final_text
                 }
 
                 if mode == 'improve' and translated_dir:
@@ -234,7 +207,10 @@ def process_json_file(file_path, all_data_dict, translation_pairs, mode='transla
                                     raw_translation = trans_entry.get('Text', '').strip()
                                     break
                     if raw_translation:
-                        all_data_dict[name]['raw'] = raw_translation
+                        entry_details['Raw'] = raw_translation
+
+                # Append the entry details to the all_data_dict list
+                all_data_dict.append(entry_details)
 
                 # Store as original=translation pair for txt output, escaping newlines
                 escaped_original = original_text.replace('\r', '\\r').replace('\n', '\\n')
