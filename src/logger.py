@@ -1,6 +1,5 @@
 import logging
 from datetime import datetime
-import os
 from pathlib import Path
 
 # Define custom log levels for our specific needs

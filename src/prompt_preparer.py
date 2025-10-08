@@ -1,11 +1,12 @@
 import json
 import time
 from pathlib import Path
-from src.grossary import load_grossary, find_original_matches
-from src.config import INPUT_DIR
+import aiofiles
+import asyncio
+from src.grossary import find_original_matches
 from src.logger import logger
 
-def prepare_prompt_data(original_file_path, translated_dir=None, glossary_file_path=None):
+async def prepare_prompt_data(original_file_path, translated_dir=None, name_to_translated=None, original_to_translated=None):
     """
     Prepare translation prompts using:
     - name (key) and text from original file
@@ -13,8 +14,9 @@ def prepare_prompt_data(original_file_path, translated_dir=None, glossary_file_p
     - existing translations from translated files if available
     """
     # Load original file
-    with open(original_file_path, 'r', encoding='utf-8') as f:
-        original_data = json.load(f)
+    async with aiofiles.open(original_file_path, 'r', encoding='utf-8') as f:
+        content = await f.read()
+        original_data = json.loads(content)
 
     # Extract entries from original
     entries = original_data.get('entries', [])
@@ -25,17 +27,15 @@ def prepare_prompt_data(original_file_path, translated_dir=None, glossary_file_p
 
     logger.debug(f"Original entries for {original_file_path.name}: {original_entries}")
 
-    # Load glossary mapping
-    name_to_translated, original_to_translated = load_grossary(glossary_file_path)
-
     # If translated_dir provided, try to find existing translations
     translated_file = None
     if translated_dir:
         file_name = Path(original_file_path).name
         trans_path = Path(translated_dir) / file_name
         if trans_path.exists():
-            with open(trans_path, 'r', encoding='utf-8') as f:
-                translated_data = json.load(f)
+            async with aiofiles.open(trans_path, 'r', encoding='utf-8') as f:
+                trans_content = await f.read()
+                translated_data = json.loads(trans_content)
                 entries = translated_data.get('entries', [])
                 if isinstance(entries, dict) and 'Array' in entries:
                     translated_file = entries['Array']
@@ -117,7 +117,7 @@ Nhiệm vụ của bạn là:
     logger.debug(f"Generated prompt data list: {prompt_data}")
     return prompt_data, translated_file
 
-def prepare_all_files(original_dir, translated_dir=None, glossary_file_path=None):
+async def prepare_all_files(original_dir, translated_dir=None, name_to_translated=None, original_to_translated=None):
     """
     Process all original JSON files and prepare translation prompts
 
@@ -130,19 +130,19 @@ def prepare_all_files(original_dir, translated_dir=None, glossary_file_path=None
     all_prompts = {}
     run_start = time.time()
 
+    tasks = []
     for file_path in json_dir.glob('*.json'):
-        file_start = time.time()
-        logger.info(f"Preparing prompts for {file_path.name}")
+        tasks.append(prepare_prompt_data(str(file_path), translated_dir, name_to_translated, original_to_translated))
 
-        try:
-            prompts = prepare_prompt_data(str(file_path), translated_dir, glossary_file_path)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for file_path, result in zip(json_dir.glob('*.json'), results):
+        if isinstance(result, Exception):
+            logger.error(f"✗ Error processing {file_path.name}: {str(result)}", exc_info=True)
+        else:
+            prompts, translated_file = result
             all_prompts[file_path.name] = prompts
-
-            file_end = time.time()
-            logger.info(f"✓ Prepared {len(prompts)} prompts for {file_path.name} in {file_end-file_start:.2f}s")
-        except Exception as e:
-            logger.error(f"✗ Error processing {file_path.name}: {str(e)}", exc_info=True)
-            continue
+            logger.info(f"✓ Prepared {len(prompts)} prompts for {file_path.name}")
 
     run_end = time.time()
     logger.info(f"Prompt preparation completed in {run_end-run_start:.2f}s")

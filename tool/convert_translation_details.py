@@ -4,7 +4,7 @@
 import json
 import argparse
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict
 
 def convert_old_to_new_format(old_data: Dict[str, Dict[str, str]]) -> List[Dict[str, str]]:
     """Converts old translation_details.json format to the new list format.

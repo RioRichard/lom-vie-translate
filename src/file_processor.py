@@ -4,7 +4,7 @@ from pathlib import Path
 import concurrent.futures
 from src.translator import translate_text
 from src.prompt_preparer import prepare_prompt_data
-from src.config import RATE_LIMIT_DELAY, MAX_CONCURRENT, INPUT_DIR, OUTPUT_DIR
+from src.config import RATE_LIMIT_DELAY, MAX_CONCURRENT, OUTPUT_DIR
 from src.logger import logger
 
 
@@ -58,7 +58,9 @@ def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, na
         text=original_text,
         thread_idx=thread_idx,
         name=name,
-        prompt_data=prompt_data
+        prompt_data=prompt_data,
+        name_to_translated=name_to_translated,
+        original_to_translated=original_to_translated
     )
 
     time.sleep(RATE_LIMIT_DELAY)
@@ -82,7 +84,7 @@ def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, na
         'Text': translated_text
     }
 
-def process_json_file(file_path, all_data_dict, translation_pairs, mode='translate', translated_dir=None, json_output_dir=None, glossary_file_path=None):
+def process_json_file(file_path, all_data_dict, translation_pairs, mode='translate', translated_dir=None, json_output_dir=None, name_to_translated=None, original_to_translated=None):
     """Process a JSON file for translation or improvement
 
     Args:
@@ -99,7 +101,6 @@ def process_json_file(file_path, all_data_dict, translation_pairs, mode='transla
         ValueError: If mode is invalid or if translated_dir is missing in improve mode
     """
     from src.config import VALID_MODES
-    from src.grossary import load_grossary
 
     if mode not in VALID_MODES:
         raise ValueError(f"Invalid mode: {mode}. Must be one of {VALID_MODES}")
@@ -114,13 +115,12 @@ def process_json_file(file_path, all_data_dict, translation_pairs, mode='transla
 
     logger.file_start(file_name)
 
-    name_to_translated, original_to_translated = load_grossary(glossary_file_path)
-
     # Prepare prompts with appropriate templates and context
     prompt_data_list, old_translated_file_data = prepare_prompt_data(
         original_file_path=file_path,
         translated_dir=translated_dir if mode == 'improve' else None,
-        glossary_file_path=glossary_file_path
+        name_to_translated=name_to_translated,
+        original_to_translated=original_to_translated
     )
     try:
         file_start = time.time()
@@ -141,7 +141,6 @@ def process_json_file(file_path, all_data_dict, translation_pairs, mode='transla
             is_array_format = False
         # Process all entries concurrently
         logger.concurrent_info(len(entries_list), MAX_CONCURRENT)
-        file_line_start = time.time()
 
         def safe_process_entry_with_delay(args):
             entry, idx, prompt = args

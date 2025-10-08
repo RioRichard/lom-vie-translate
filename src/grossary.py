@@ -1,4 +1,3 @@
-import os
 import json
 from pathlib import Path
 from src.config import GROSSARY_DIR

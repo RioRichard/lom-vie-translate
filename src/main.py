@@ -2,11 +2,14 @@ from pathlib import Path
 import json
 import argparse
 import time
+import asyncio
+import aiofiles
 from src.file_processor import process_json_file
 from src.config import INPUT_DIR, OUTPUT_DIR
 from src.logger import logger
+from src.grossary import load_grossary
 
-def main():
+async def main_async():
     parser = argparse.ArgumentParser(
         description='Chinese to Vietnamese translation tool',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
@@ -107,30 +110,40 @@ def main():
     # List to store all translation pairs for txt output
     translation_pairs = []
 
-    # Process all files
-    for file_path in json_dir.glob("*.json"):
-        process_json_file(
+    # Load glossary once
+    name_to_translated, original_to_translated = load_grossary(args.glossary_file)
+
+    # Process all files concurrently for loading and prompt preparation
+    file_paths = list(json_dir.glob("*.json"))
+    tasks = []
+    for file_path in file_paths:
+        tasks.append(process_json_file(
             file_path=file_path,
             all_data_dict=all_data_dict,
             translation_pairs=translation_pairs,
             mode=args.mode,
             translated_dir=translated_dir,
             json_output_dir=json_output_dir,
-            glossary_file_path=args.glossary_file
-        )
+            name_to_translated=name_to_translated,
+            original_to_translated=original_to_translated
+        ))
+
+    # Execute tasks sequentially to respect rate limits during translation
+    for task in tasks:
+        await task
 
     # Save consolidated JSON with full translation details
     details_file = details_output_dir / "translation_details.json"
-    with open(details_file, "w", encoding="utf-8") as f:
-        json.dump(all_data_dict, f, ensure_ascii=False, indent=2)
+    async with aiofiles.open(details_file, "w", encoding="utf-8") as f:
+        await f.write(json.dumps(all_data_dict, ensure_ascii=False, indent=2))
 
     # Save translation pairs to txt file
     pairs_file = pairs_output_dir / "translation_pairs.txt"
-    with open(pairs_file, "w", encoding="utf-8") as f:
-        f.write("\n".join(translation_pairs))
+    async with aiofiles.open(pairs_file, "w", encoding="utf-8") as f:
+        await f.write("\n".join(translation_pairs))
 
     run_end = time.time()
-    files_processed = len(list(json_dir.glob("*.json")))
+    files_processed = len(file_paths)
     total_translations = len(all_data_dict)
 
     logger.run_summary(
@@ -143,6 +156,9 @@ def main():
     logger.info(f"  - Individual JSON files: {json_output_dir}")
     logger.info(f"  - Translation details: {details_file}")
     logger.info(f"  - Translation pairs: {pairs_file}")
+
+def main():
+    asyncio.run(main_async())
 
 if __name__ == "__main__":
     main()
