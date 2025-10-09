@@ -36,16 +36,14 @@ async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=No
         async_tqdm.write(f"[DEBUG] Skipping empty text for entry: {name}")
         return entry
 
-    # Check for glossary match by Name and Original text
-    if name_to_translated and original_to_translated:
-        glossary_translated_by_name = name_to_translated.get(name)
+    # Check for glossary match by Original text
+    if original_to_translated:
         glossary_translated_by_original = original_to_translated.get(original_text)
-
-        if glossary_translated_by_name and glossary_translated_by_original and glossary_translated_by_name == glossary_translated_by_original:
-            async_tqdm.write(f"[INFO] Reusing glossary translation for '{name}': '{original_text}' -> '{glossary_translated_by_name}'")
+        if glossary_translated_by_original:
+            async_tqdm.write(f"[INFO] Reusing glossary translation for original text: '{original_text}' -> '{glossary_translated_by_original}'")
             return {
                 'Name': name,
-                'Text': glossary_translated_by_name
+                'Text': glossary_translated_by_original
             }
 
     # Start translation
@@ -89,11 +87,12 @@ async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=No
         'Text': translated_text
     }
 
-async def process_json_file(file_path, all_data_dict, translation_pairs, mode='translate', translated_dir=None, json_output_dir=None, name_to_translated=None, original_to_translated=None):
+async def process_json_file(file_path, file_content, all_data_dict, translation_pairs, mode='translate', translated_dir=None, json_output_dir=None, name_to_translated=None, original_to_translated=None):
     """Process a JSON file for translation or improvement
 
     Args:
         file_path: Path to the input JSON file
+        file_content: Content of the input JSON file
         all_data_dict: Dictionary to store detailed translation data including original and raw translations
         translation_pairs: List to store original=translation pairs for txt output
         mode: 'translate' for fresh translation or 'improve' for improving existing translations
@@ -118,23 +117,23 @@ async def process_json_file(file_path, all_data_dict, translation_pairs, mode='t
     json_output_dir.mkdir(parents=True, exist_ok=True)
     output_path = json_output_dir / file_name
 
-    # Prepare prompts with appropriate templates and context
-    prompt_data_list, old_translated_file_data = await prepare_prompt_data(
-        original_file_path=file_path,
-        translated_dir=translated_dir if mode == 'improve' else None,
-        name_to_translated=name_to_translated,
-        original_to_translated=original_to_translated
-    )
     try:
         file_start = time.time()
-        async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
-            data = json.loads(await f.read())
+        data = json.loads(file_content)
         language = data.get('Language')
         if language != 'ChineseSimplified':
             async with aiofiles.open(output_path, 'w', encoding='utf-8') as f:
                 await f.write(json.dumps(data, ensure_ascii=False, indent=2))
             async_tqdm.write(f"Skipped non-ChineseSimplified file: {file_name} (Language: {language})") # Use tqdm.write
             return
+
+        # Prepare prompts with appropriate templates and context
+        prompt_data_list, old_translated_file_data = await prepare_prompt_data(
+            original_file_path=file_path,
+            original_data=data,
+            translated_dir=translated_dir if mode == 'improve' else None,
+            original_to_translated=original_to_translated
+        )
         entries = data.get('entries', [])
         if isinstance(entries, dict) and 'Array' in entries:
             entries_list = entries['Array']

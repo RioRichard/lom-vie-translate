@@ -15,18 +15,21 @@ async def file_producer(file_paths, queue, semaphore, progress_bar):
     async def read_file_and_put_in_queue(file_path):
         async with semaphore:
             progress_bar.set_description(f"Queuing file: {file_path.name} (Queue size: {queue.qsize()})")
-            await queue.put(file_path)
+            async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
+                content = await f.read()
+            await queue.put((file_path, content))
 
     tasks = [read_file_and_put_in_queue(file_path) for file_path in file_paths]
     await asyncio.gather(*tasks)
 
 async def file_consumer(queue, all_data_dict, translation_pairs, mode, translated_dir, json_output_dir, name_to_translated, original_to_translated, progress_bar):
     while True:
-        file_path = await queue.get()
+        file_path, file_content = await queue.get()
         try:
             progress_bar.set_description(f"Processing file: {file_path.name}")
             await process_json_file(
                 file_path=file_path,
+                file_content=file_content,
                 all_data_dict=all_data_dict,
                 translation_pairs=translation_pairs,
                 mode=mode,

@@ -6,7 +6,7 @@ import asyncio
 from src.glossary import find_original_matches
 from src.logger import logger
 
-async def prepare_prompt_data(original_file_path, translated_dir=None, name_to_translated=None, original_to_translated=None):
+async def prepare_prompt_data(original_file_path, original_data, translated_dir=None, original_to_translated=None):
     """
     Prepare translation prompts using:
     - name (key) and text from original file
@@ -14,9 +14,7 @@ async def prepare_prompt_data(original_file_path, translated_dir=None, name_to_t
     - existing translations from translated files if available
     """
     # Load original file
-    async with aiofiles.open(original_file_path, 'r', encoding='utf-8') as f:
-        content = await f.read()
-        original_data = json.loads(content)
+    # original_data is already loaded in process_json_file
 
     # Extract entries from original
     entries = original_data.get('entries', [])
@@ -116,41 +114,3 @@ Nhiệm vụ của bạn là:
 
     logger.debug(f"Generated prompt data list: {prompt_data}")
     return prompt_data, translated_file
-
-async def prepare_all_files(original_dir, translated_dir=None, name_to_translated=None, original_to_translated=None):
-    """
-    Process all original JSON files and prepare translation prompts
-
-    Args:
-        original_dir (str): Directory containing original JSON files
-        translated_dir (str, optional): Directory containing translated JSON files for reference
-        glossary_file_path (str, optional): Path to a specific glossary file to use.
-    """
-    json_dir = Path(original_dir)
-    all_prompts = {}
-    run_start = time.time()
-
-    tasks = []
-    for file_path in json_dir.glob('*.json'):
-        tasks.append(prepare_prompt_data(str(file_path), translated_dir, name_to_translated, original_to_translated))
-
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    for file_path, result in zip(json_dir.glob('*.json'), results):
-        if isinstance(result, Exception):
-            logger.error(f"✗ Error processing {file_path.name}: {str(result)}", exc_info=True)
-        else:
-            prompts, translated_file = result
-            all_prompts[file_path.name] = prompts
-            logger.info(f"✓ Prepared {len(prompts)} prompts for {file_path.name}")
-
-    run_end = time.time()
-    logger.info(f"Prompt preparation completed in {run_end-run_start:.2f}s")
-    logger.info(f"Successfully processed {len(all_prompts)} files")
-    return all_prompts
-
-# Example usage:
-# result = prepare_all_files()
-# for fname, entries in result.items():
-#     for entry in entries:
-#         print(entry)
