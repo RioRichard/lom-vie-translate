@@ -100,6 +100,6 @@ Nhiệm vụ của bạn là:
                 logger.info(f"Retrying with next API key (Attempt {retries + 1}/{max_retries})")
                 time.sleep((RATE_LIMIT_IF_QUOTA_EXCEEDED)/(max_retries-retries))
             else:
-                logger.error("All API keys failed. Returning original text.")
+                logger.critical("All API keys failed. Please check your API_KEYS in the .env file and ensure they are valid and have the necessary permissions in your Google Cloud project. Returning original text.")
                 return text
     return text

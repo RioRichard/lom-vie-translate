@@ -135,12 +135,27 @@ The glossary helps maintain consistent translations for frequently used terms.
 
 ### Translation Mode
 ```bash
-python src/main.py --mode translate --input-dir /path/to/input --output-dir /path/to/output
+python src/main.py \
+    --mode translate \
+    --input-dir /path/to/input_jsons \
+    --output-dir /path/to/base_output \
+    --json-output-dir /path/to/json_output (optional, defaults to --output-dir/json) \
+    --details-output-dir /path/to/details_output (optional, defaults to --output-dir/details) \
+    --pairs-output-dir /path/to/pairs_output (optional, defaults to --output-dir/pairs) \
+    --glossary-file /path/to/your_glossary.json (optional)
 ```
 
 ### Improvement Mode
 ```bash
-python src/main.py --mode improve --input-dir /path/to/input --translated-dir /path/to/raw --output-dir /path/to/output
+python src/main.py \
+    --mode improve \
+    --input-dir /path/to/input_jsons \
+    --translated-dir /path/to/raw_translations \
+    --output-dir /path/to/base_output \
+    --json-output-dir /path/to/json_output (optional, defaults to --output-dir/json) \
+    --details-output-dir /path/to/details_output (optional, defaults to --output-dir/details) \
+    --pairs-output-dir /path/to/pairs_output (optional, defaults to --output-dir/pairs) \
+    --glossary-file /path/to/your_glossary.json (optional)
 ```
 
 ## Tool Usage

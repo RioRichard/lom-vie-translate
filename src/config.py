@@ -14,6 +14,7 @@ GOOGLE_STUDIO_AI_LLM = os.getenv('GOOGLE_STUDIO_AI_LLM', 'gemma-3-27b-it')
 RATE_LIMIT_DELAY = float(os.getenv('RATE_LIMIT_DELAY', '2'))
 RATE_LIMIT_IF_QUOTA_EXCEEDED = float(os.getenv('RATE_LIMIT_IF_QUOTA_EXCEEDED', '60'))
 MAX_CONCURRENT = int(os.getenv('MAX_CONCURRENT', '5'))
+MAX_CONCURRENT_FILE_OPENS = int(os.getenv('MAX_CONCURRENT_FILE_OPENS', '20'))
 
 # Directory Configuration
 BASE_DIR = os.getenv('BASE_DIR', os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

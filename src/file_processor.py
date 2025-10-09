@@ -1,15 +1,15 @@
 import json
 import time
 from pathlib import Path
-import concurrent.futures
+import aiofiles
+from tqdm.asyncio import tqdm as async_tqdm
 from src.translator import translate_text
 from src.prompt_preparer import prepare_prompt_data
-from src.config import RATE_LIMIT_DELAY, MAX_CONCURRENT, OUTPUT_DIR
-from src.logger import logger
+from src.config import MAX_CONCURRENT, OUTPUT_DIR
 
 
 
-def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, name_to_translated=None, original_to_translated=None):
+async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, name_to_translated=None, original_to_translated=None):
     """Process a single entry for translation or improvement
 
     Args:
@@ -25,7 +25,7 @@ def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, na
     """
     # Ensure we have the required fields
     if 'Name' not in entry or 'Text' not in entry:
-        logger.warning(f"Entry missing required fields: {entry}")
+        async_tqdm.write(f"[WARNING] Entry missing required fields: {entry}")
         return entry
 
     name = entry['Name']
@@ -33,7 +33,7 @@ def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, na
 
     # Skip empty text
     if not original_text:
-        logger.debug(f"Skipping empty text for entry: {name}")
+        async_tqdm.write(f"[DEBUG] Skipping empty text for entry: {name}")
         return entry
 
     # Check for glossary match by Name and Original text
@@ -42,7 +42,7 @@ def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, na
         glossary_translated_by_original = original_to_translated.get(original_text)
 
         if glossary_translated_by_name and glossary_translated_by_original and glossary_translated_by_name == glossary_translated_by_original:
-            logger.info(f"Reusing glossary translation for '{name}': '{original_text}' -> '{glossary_translated_by_name}'")
+            async_tqdm.write(f"[INFO] Reusing glossary translation for '{name}': '{original_text}' -> '{glossary_translated_by_name}'")
             return {
                 'Name': name,
                 'Text': glossary_translated_by_name
@@ -51,8 +51,8 @@ def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, na
     # Start translation
     line_start = time.time()
 
-    logger.debug(f"Type of prompt_data in process_entry: {type(prompt_data)}")
-    logger.debug(f"Content of prompt_data in process_entry: {prompt_data}")
+    async_tqdm.write(f"[DEBUG] Type of prompt_data in process_entry: {type(prompt_data)}")
+    async_tqdm.write(f"[DEBUG] Content of prompt_data in process_entry: {prompt_data}")
 
     translated_text = translate_text(
         text=original_text,
@@ -63,20 +63,25 @@ def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, na
         original_to_translated=original_to_translated
     )
 
-    time.sleep(RATE_LIMIT_DELAY)
+    # await asyncio.sleep(RATE_LIMIT_DELAY)
     line_end = time.time()
 
     # Log the translation with raw translation if available in improve mode
     raw_translation = prompt_data.get('raw_translation') if prompt_data else None
 
-    logger.translation_detail(
-        name=name,
-        original=original_text,
-        translated=translated_text,
-        duration=line_end - line_start,
-        raw_translation=raw_translation,
-        mode=mode
+    action = "Translation" if mode == 'translate' else "Improvement"
+    message = (
+        f"{action} completed in {line_end - line_start:.2f}s\n"
+        f"    Name: {name}\n"
+        f"    Original: {original_text}\n"
     )
+
+    if mode == 'improve' and raw_translation:
+        message += f"    Raw Translation: {raw_translation}\n"
+
+    message += f"    Final Output: {translated_text}"
+
+    async_tqdm.write(message)
 
     # Return entry with same structure but translated text
     return {
@@ -84,7 +89,7 @@ def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, na
         'Text': translated_text
     }
 
-def process_json_file(file_path, all_data_dict, translation_pairs, mode='translate', translated_dir=None, json_output_dir=None, name_to_translated=None, original_to_translated=None):
+async def process_json_file(file_path, all_data_dict, translation_pairs, mode='translate', translated_dir=None, json_output_dir=None, name_to_translated=None, original_to_translated=None):
     """Process a JSON file for translation or improvement
 
     Args:
@@ -113,10 +118,8 @@ def process_json_file(file_path, all_data_dict, translation_pairs, mode='transla
     json_output_dir.mkdir(parents=True, exist_ok=True)
     output_path = json_output_dir / file_name
 
-    logger.file_start(file_name)
-
     # Prepare prompts with appropriate templates and context
-    prompt_data_list, old_translated_file_data = prepare_prompt_data(
+    prompt_data_list, old_translated_file_data = await prepare_prompt_data(
         original_file_path=file_path,
         translated_dir=translated_dir if mode == 'improve' else None,
         name_to_translated=name_to_translated,
@@ -124,13 +127,13 @@ def process_json_file(file_path, all_data_dict, translation_pairs, mode='transla
     )
     try:
         file_start = time.time()
-        with open(file_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+        async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
+            data = json.loads(await f.read())
         language = data.get('Language')
         if language != 'ChineseSimplified':
-            with open(output_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            logger.info(f"Skipped non-ChineseSimplified file: {file_name} (Language: {language})")
+            async with aiofiles.open(output_path, 'w', encoding='utf-8') as f:
+                await f.write(json.dumps(data, ensure_ascii=False, indent=2))
+            async_tqdm.write(f"Skipped non-ChineseSimplified file: {file_name} (Language: {language})") # Use tqdm.write
             return
         entries = data.get('entries', [])
         if isinstance(entries, dict) and 'Array' in entries:
@@ -140,11 +143,11 @@ def process_json_file(file_path, all_data_dict, translation_pairs, mode='transla
             entries_list = entries
             is_array_format = False
         # Process all entries concurrently
-        logger.concurrent_info(len(entries_list), MAX_CONCURRENT)
+        async_tqdm.write(f"[INFO] Processing {len(entries_list)} entries with {MAX_CONCURRENT} concurrent workers")
 
-        def safe_process_entry_with_delay(args):
+        async def safe_process_entry_with_delay(args):
             entry, idx, prompt = args
-            return process_entry(
+            return await process_entry(
                 entry=entry,
                 thread_idx=idx,
                 mode=mode,
@@ -155,9 +158,9 @@ def process_json_file(file_path, all_data_dict, translation_pairs, mode='transla
 
         # Create list of tasks with their corresponding prompts
         if len(prompt_data_list) != len(entries_list):
-            logger.warning(f"Number of prompts ({len(prompt_data_list)}) doesn't match number of entries ({len(entries_list)})")
-            logger.debug(f"Entries list: {entries_list}")
-            logger.debug(f"Prompt data list: {prompt_data_list}")
+            async_tqdm.write(f"[WARNING] Number of prompts ({len(prompt_data_list)}) doesn't match number of entries ({len(entries_list)})")
+            async_tqdm.write(f"[DEBUG] Entries list: {entries_list}")
+            async_tqdm.write(f"[DEBUG] Prompt data list: {prompt_data_list}")
 
         tasks = []
         for idx, entry in enumerate(entries_list):
@@ -170,15 +173,17 @@ def process_json_file(file_path, all_data_dict, translation_pairs, mode='transla
             }
             tasks.append((entry, idx, prompt))
 
-        # Process all entries concurrently
-        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT) as executor:
-            translations = list(executor.map(safe_process_entry_with_delay, tasks))
+        # Process all entries sequentially with tqdm progress bar
+        translations = []
+        for idx, task in enumerate(async_tqdm(tasks, desc=f"Entries in {file_name}", leave=False, mininterval=0.1)):
+            translations.append(await safe_process_entry_with_delay(task))
+
         if is_array_format:
             data['entries']['Array'] = translations
         else:
             data['entries'] = translations
-        with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        async with aiofiles.open(output_path, 'w', encoding='utf-8') as f:
+            await f.write(json.dumps(data, ensure_ascii=False, indent=2))
         # Store translation data
         for entry, original_entry in zip(translations, entries_list):
             name = entry.get('Name')
@@ -198,8 +203,8 @@ def process_json_file(file_path, all_data_dict, translation_pairs, mode='transla
                     raw_translation = None
                     trans_path = Path(translated_dir) / file_name
                     if trans_path.exists():
-                        with open(trans_path, 'r', encoding='utf-8') as f:
-                            trans_data = json.load(f)
+                        async with aiofiles.open(trans_path, 'r', encoding='utf-8') as f:
+                            trans_data = json.loads(await f.read())
                             trans_entries = trans_data.get('entries', {}).get('Array', [])
                             for trans_entry in trans_entries:
                                 if trans_entry.get('Name') == name:
@@ -214,8 +219,9 @@ def process_json_file(file_path, all_data_dict, translation_pairs, mode='transla
                 # Store as original=translation pair for txt output, escaping newlines
                 escaped_original = original_text.replace('\r', '\\r').replace('\n', '\\n')
                 escaped_final = final_text.replace('\r', '\\r').replace('\n', '\\n')
-                translation_pairs.append(f"{escaped_original}={escaped_final}")
+                if escaped_original not in translation_pairs:
+                    translation_pairs[escaped_original] = escaped_final
         file_end = time.time()
-        logger.file_end(file_name, len(translations), file_end - file_start)
+        async_tqdm.write(f"[INFO] Completed {file_name} - {len(translations)} translations in {file_end - file_start:.2f}s")
     except Exception as e:
-        logger.error(f"Error processing {file_name}: {str(e)}", exc_info=True)
+        async_tqdm.write(f"[ERROR] Error processing {file_name}: {str(e)}", exc_info=True)

@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from pathlib import Path
+from tqdm import tqdm
 
 # Define custom log levels for our specific needs
 TRANSLATION = 25  # Between INFO and WARNING
@@ -10,6 +11,9 @@ class TranslationLogger:
     def __init__(self, log_dir="logs"):
         self.logger = logging.getLogger('translation')
         self.logger.setLevel(logging.DEBUG)
+
+        # Suppress warnings from google.generativeai library
+        logging.getLogger('google.generativeai').setLevel(logging.ERROR)
 
         # Create log directory if it doesn't exist
         log_dir = Path(log_dir)
@@ -28,19 +32,13 @@ class TranslationLogger:
         )
         file_handler.setFormatter(file_format)
 
-        # Console handler with more concise format
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-        console_format = logging.Formatter('[%(levelname)s] %(message)s')
-        console_handler.setFormatter(console_format)
-
         # Add handlers to logger
         self.logger.addHandler(file_handler)
-        self.logger.addHandler(console_handler)
 
     def translation(self, msg, *args, **kwargs):
         """Log translation-specific information"""
         self.logger.log(TRANSLATION, msg, *args, **kwargs)
+        tqdm.write(f"[TRANSLATION] {msg}", *args, **kwargs)
 
     def debug(self, msg, *args, **kwargs):
         """Log detailed information for debugging"""
@@ -49,26 +47,22 @@ class TranslationLogger:
     def info(self, msg, *args, **kwargs):
         """Log general information about program execution"""
         self.logger.info(msg, *args, **kwargs)
+        tqdm.write(msg, *args, **kwargs)
 
     def warning(self, msg, *args, **kwargs):
         """Log warnings about potential issues"""
         self.logger.warning(msg, *args, **kwargs)
+        tqdm.write(f"[WARNING] {msg}", *args, **kwargs)
 
     def error(self, msg, *args, **kwargs):
         """Log errors that don't stop program execution"""
         self.logger.error(msg, *args, **kwargs)
+        tqdm.write(f"[ERROR] {msg}", *args, **kwargs)
 
     def critical(self, msg, *args, **kwargs):
         """Log critical errors that might stop program execution"""
         self.logger.critical(msg, *args, **kwargs)
-
-    def file_start(self, filename):
-        """Log the start of processing a file"""
-        self.info(f"Processing file: {filename}")
-
-    def file_end(self, filename, count, duration):
-        """Log the completion of processing a file"""
-        self.info(f"Completed {filename} - {count} translations in {duration:.2f}s")
+        tqdm.write(f"[CRITICAL] {msg}", *args, **kwargs)
 
     def translation_detail(self, name, original, translated, duration, raw_translation=None, mode='translate'):
         """Log details of a single translation
@@ -97,7 +91,7 @@ class TranslationLogger:
 
     def run_summary(self, files_processed, total_translations, total_time):
         """Log a summary of the entire run"""
-        self.info(
+        tqdm.write(
             f"\nRun Summary:\n"
             f"    Files Processed: {files_processed}\n"
             f"    Total Translations: {total_translations}\n"
@@ -120,7 +114,7 @@ class TranslationLogger:
 
     def concurrent_info(self, count, workers):
         """Log concurrent processing information"""
-        self.info(f"Processing {count} entries with {workers} concurrent workers")
+        tqdm.write(f"Processing {count} entries with {workers} concurrent workers")
 
     def google_api_warning(self, message):
         """Log Google API related warnings at debug level to reduce noise"""

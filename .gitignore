@@ -53,6 +53,8 @@ Resource/
 old_code/
 logs/
 translated_output_json/
+.pytest_cache/
+.ruff_cache/
 
 # Allow
 !src/

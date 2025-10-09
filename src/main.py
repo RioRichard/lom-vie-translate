@@ -4,10 +4,40 @@ import argparse
 import time
 import asyncio
 import aiofiles
+from collections import OrderedDict
+from tqdm.asyncio import tqdm as async_tqdm
 from src.file_processor import process_json_file
-from src.config import INPUT_DIR, OUTPUT_DIR
+from src.config import INPUT_DIR, OUTPUT_DIR, MAX_CONCURRENT_FILE_OPENS
 from src.logger import logger
 from src.grossary import load_grossary
+
+async def file_producer(file_paths, queue, semaphore, progress_bar):
+    async def read_file_and_put_in_queue(file_path):
+        async with semaphore:
+            progress_bar.set_description(f"Queuing file: {file_path.name} (Queue size: {queue.qsize()})")
+            await queue.put(file_path)
+
+    tasks = [read_file_and_put_in_queue(file_path) for file_path in file_paths]
+    await asyncio.gather(*tasks)
+
+async def file_consumer(queue, all_data_dict, translation_pairs, mode, translated_dir, json_output_dir, name_to_translated, original_to_translated, progress_bar):
+    while True:
+        file_path = await queue.get()
+        try:
+            progress_bar.set_description(f"Processing file: {file_path.name}")
+            await process_json_file(
+                file_path=file_path,
+                all_data_dict=all_data_dict,
+                translation_pairs=translation_pairs,
+                mode=mode,
+                translated_dir=translated_dir,
+                json_output_dir=json_output_dir,
+                name_to_translated=name_to_translated,
+                original_to_translated=original_to_translated
+            )
+            progress_bar.update(1) # Update after file is fully processed
+        finally:
+            queue.task_done()
 
 async def main_async():
     parser = argparse.ArgumentParser(
@@ -37,6 +67,11 @@ async def main_async():
     )
 
     parser.add_argument(
+        '--translated-dir',
+        help='Directory containing existing raw translations (required for improve mode)'
+    )
+
+    parser.add_argument(
         '--json-output-dir',
         help='Directory for individual translated JSON files (defaults to output-dir/json)'
     )
@@ -52,11 +87,6 @@ async def main_async():
     )
 
     parser.add_argument(
-        '--translated-dir',
-        help='Directory containing existing translations (required for improve mode)'
-    )
-
-    parser.add_argument(
         '--glossary-file',
         help='Path to a specific glossary file (.json or .txt) to use (optional)'
     )
@@ -68,7 +98,7 @@ async def main_async():
         parser.error("--translated-dir is required when using --mode=improve")
     # Allow translated_dir in translate mode for checking old translations
     if args.mode == 'translate' and args.translated_dir:
-        logger.info(f"Using existing translations directory for lookup: {args.translated_dir}")
+        async_tqdm.write(f"Using existing translations directory for lookup: {args.translated_dir}")
 
     json_dir = Path(args.input_dir)
     if not json_dir.exists():
@@ -97,40 +127,47 @@ async def main_async():
 
     all_data_dict = []
 
-    logger.info(f"Starting translation in {args.mode} mode")
-    logger.info(f"Input directory: {json_dir}")
-    logger.info(f"JSON output directory: {json_output_dir}")
-    logger.info(f"Details output directory: {details_output_dir}")
-    logger.info(f"Pairs output directory: {pairs_output_dir}")
+    async_tqdm.write(f"Starting translation in {args.mode} mode")
+    async_tqdm.write(f"Input directory: {json_dir}")
+    async_tqdm.write(f"JSON output directory: {json_output_dir}")
+    async_tqdm.write(f"Details output directory: {details_output_dir}")
+    async_tqdm.write(f"Pairs output directory: {pairs_output_dir}")
     if translated_dir:
-        logger.info(f"Existing translations directory: {translated_dir}")
+        async_tqdm.write(f"Existing translations directory: {translated_dir}")
 
     run_start = time.time()
 
-    # List to store all translation pairs for txt output
-    translation_pairs = []
+    # Dictionary to store all unique translation pairs for txt output
+    translation_pairs = OrderedDict()
 
     # Load glossary once
     name_to_translated, original_to_translated = load_grossary(args.glossary_file)
 
-    # Process all files concurrently for loading and prompt preparation
     file_paths = list(json_dir.glob("*.json"))
-    tasks = []
-    for file_path in file_paths:
-        tasks.append(process_json_file(
-            file_path=file_path,
-            all_data_dict=all_data_dict,
-            translation_pairs=translation_pairs,
-            mode=args.mode,
-            translated_dir=translated_dir,
-            json_output_dir=json_output_dir,
-            name_to_translated=name_to_translated,
-            original_to_translated=original_to_translated
+    total_files = len(file_paths)
+    async_tqdm.write(f"Total files to process: {total_files}")
+
+    queue = asyncio.Queue()
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_FILE_OPENS)
+
+    with async_tqdm(total=total_files, desc="Initializing...", mininterval=0, miniters=1) as progress_bar:
+        producer_task = asyncio.create_task(file_producer(file_paths, queue, semaphore, progress_bar))
+        consumer_task = asyncio.create_task(file_consumer(
+            queue,
+            all_data_dict,
+            translation_pairs,
+            args.mode,
+            translated_dir,
+            json_output_dir,
+            name_to_translated,
+            original_to_translated,
+            progress_bar # Pass progress_bar to consumer
         ))
 
-    # Execute tasks sequentially to respect rate limits during translation
-    for task in tasks:
-        await task
+        await producer_task
+        await queue.join()
+        consumer_task.cancel()
+        await asyncio.gather(consumer_task, return_exceptions=True)
 
     # Save consolidated JSON with full translation details
     details_file = details_output_dir / "translation_details.json"
@@ -140,7 +177,7 @@ async def main_async():
     # Save translation pairs to txt file
     pairs_file = pairs_output_dir / "translation_pairs.txt"
     async with aiofiles.open(pairs_file, "w", encoding="utf-8") as f:
-        await f.write("\n".join(translation_pairs))
+        await f.write("\n".join([f"{original}={translated}" for original, translated in translation_pairs.items()]))
 
     run_end = time.time()
     files_processed = len(file_paths)
@@ -152,10 +189,10 @@ async def main_async():
         total_time=run_end - run_start
     )
 
-    logger.info("Results saved to:")
-    logger.info(f"  - Individual JSON files: {json_output_dir}")
-    logger.info(f"  - Translation details: {details_file}")
-    logger.info(f"  - Translation pairs: {pairs_file}")
+    async_tqdm.write("Results saved to:")
+    async_tqdm.write(f"  - Individual JSON files: {json_output_dir}")
+    async_tqdm.write(f"  - Translation details: {details_file}")
+    async_tqdm.write(f"  - Translation pairs: {pairs_file}")
 
 def main():
     asyncio.run(main_async())
