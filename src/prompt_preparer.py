@@ -3,7 +3,7 @@ import time
 from pathlib import Path
 import aiofiles
 import asyncio
-from src.grossary import find_original_matches
+from src.glossary import find_original_matches
 from src.logger import logger
 
 async def prepare_prompt_data(original_file_path, translated_dir=None, name_to_translated=None, original_to_translated=None):

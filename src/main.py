@@ -9,7 +9,7 @@ from tqdm.asyncio import tqdm as async_tqdm
 from src.file_processor import process_json_file
 from src.config import INPUT_DIR, OUTPUT_DIR, MAX_CONCURRENT_FILE_OPENS
 from src.logger import logger
-from src.grossary import load_grossary
+from src.glossary import load_glossary
 
 async def file_producer(file_paths, queue, semaphore, progress_bar):
     async def read_file_and_put_in_queue(file_path):
@@ -141,7 +141,7 @@ async def main_async():
     translation_pairs = OrderedDict()
 
     # Load glossary once
-    name_to_translated, original_to_translated = load_grossary(args.glossary_file)
+    name_to_translated, original_to_translated = load_glossary(args.glossary_file)
 
     file_paths = list(json_dir.glob("*.json"))
     total_files = len(file_paths)

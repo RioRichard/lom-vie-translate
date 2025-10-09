@@ -1,6 +1,11 @@
 import json
+import sys
 from pathlib import Path
-from src.grossary import load_grossary, find_original_matches
+
+# Add project root to sys.path
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from src.glossary import load_glossary, find_original_matches
 from src.config import INPUT_DIR
 
 def load_entries(json_path):
@@ -15,16 +20,16 @@ def load_entries(json_path):
 
 def map_translation_context(json_path, glossary_file_path=None):
     entries = load_entries(json_path)
-    name_to_translated, original_to_translated = load_grossary(glossary_file_path)
+    name_to_translated, original_to_translated = load_glossary(glossary_file_path)
     mapped = []
     for entry in entries:
         original_text = entry.get('value') or entry.get('Text', '')
         raw_translated_text = entry.get('TranslatedText') or entry.get('translated') or entry.get('Text', '')
-        grossary_matches = find_original_matches(original_text, original_to_translated)
+        glossary_matches = find_original_matches(original_text, original_to_translated)
         mapped.append({
             'original_text': original_text,
             'raw_translated_text': raw_translated_text,
-            'grossary_matches': grossary_matches
+            'glossary_matches': glossary_matches
         })
     return mapped
 
@@ -35,8 +40,10 @@ def map_all_files(glossary_file_path=None):
         all_mapped[file_path.name] = map_translation_context(file_path, glossary_file_path)
     return all_mapped
 
-# Example usage:
-# result = map_all_files()
-# for fname, entries in result.items():
-#     for entry in entries:
-#         print(entry)
+if __name__ == "__main__":
+    # Example usage:
+    result = map_all_files()
+    for fname, entries in result.items():
+        print(f"--- {fname} ---")
+        for entry in entries:
+            print(entry)

@@ -1,9 +1,9 @@
 import json
 from pathlib import Path
-from src.config import GROSSARY_DIR
+from src.config import GLOSSARY_DIR
 from src.logger import logger
 
-def load_grossary(glossary_file_path=None):
+def load_glossary(glossary_file_path=None):
     """Load glossary data from JSON or TXT files.
 
     Args:
@@ -13,7 +13,7 @@ def load_grossary(glossary_file_path=None):
         Tuple of (name_to_translated, original_to_translated) dictionaries
 
     Raises:
-        FileNotFoundError: If glossary directory doesn't exist or specified file not found.
+        FileNotFoundError: If a specified glossary file is not found.
         json.JSONDecodeError: If a glossary JSON file is invalid.
     """
     name_to_translated = {}
@@ -27,12 +27,13 @@ def load_grossary(glossary_file_path=None):
             raise FileNotFoundError(f"Glossary file not found: {glossary_file_path}")
         files_to_process.append(file_path)
     else:
-        grossary_path = Path(GROSSARY_DIR)
-        if not grossary_path.exists():
-            raise FileNotFoundError(f"Glossary directory not found: {GROSSARY_DIR}")
-        files_to_process.extend(list(grossary_path.glob('*.json')))
+        glossary_path = Path(GLOSSARY_DIR)
+        if not glossary_path.exists():
+            logger.warning(f"Glossary directory not found: {GLOSSARY_DIR}")
+            return name_to_translated, original_to_translated
+        files_to_process.extend(list(glossary_path.glob('*.json')))
         if not files_to_process:
-            logger.warning(f"No glossary files found in {GROSSARY_DIR}")
+            logger.warning(f"No glossary files found in {GLOSSARY_DIR}")
             return name_to_translated, original_to_translated
 
     for file in files_to_process:

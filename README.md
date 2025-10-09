@@ -19,7 +19,7 @@ A specialized tool for translating game text from Chinese (Simplified) to Vietna
 src/
 ├── config.py          # Configuration and settings
 ├── file_processor.py  # File handling and processing
-├── grossary.py       # Glossary management
+├── glossary.py       # Glossary management
 ├── logger.py         # Logging utilities
 ├── main.py           # Main entry point
 ├── prompt_preparer.py # Translation prompt preparation
@@ -47,12 +47,11 @@ RATE_LIMIT_DELAY=2
 RATE_LIMIT_IF_QUOTA_EXCEEDED=60
 MAX_CONCURRENT=5
 
-# Directory Configuration
-BASE_DIR=/path/to/your/project
-INPUT_DIR=${BASE_DIR}/Resource/LeanLocalJson
-OUTPUT_DIR=${BASE_DIR}/translated_output
-IMPROVE_DIR=${BASE_DIR}/improved_output
-GROSSARY_DIR=${BASE_DIR}/Resource/grossary
+# Directory Configuration (paths are relative to project root)
+INPUT_DIR=Resource/LeanLocalJson
+OUTPUT_DIR=translated_output
+IMPROVE_DIR=improved_output
+GLOSSARY_DIR=Resource/glossary
 ```
 
 2. Install dependencies:
@@ -162,12 +161,12 @@ python src/main.py \
 
 The `tool/` scripts provide additional utilities for processing JSON files. These scripts now require input and output directories to be specified as command-line arguments.
 
-### 1. `create_grossary.py`
+### 1. `create_glossary.py`
 
 Aggregates original and translated JSON files into a glossary.
 
 ```bash
-python tool/create_grossary.py --src_folder /path/to/original_jsons --tgt_folder /path/to/translated_jsons --output_json /path/to/output_glossary.json --output_txt /path/to/output_glossary.txt
+python tool/create_glossary.py --src_folder /path/to/original_jsons --tgt_folder /path/to/translated_jsons --output_json /path/to/output_glossary.json --output_txt /path/to/output_glossary.txt
 ```
 
 ### 2. `filter_entries_by_category.py`
@@ -192,6 +191,14 @@ Converts old `translation_details.json` files (dictionary format) to the new lis
 
 ```bash
 python tool/convert_translation_details.py --input_file /path/to/old_translation_details.json --output_file /path/to/new_translation_details.json
+```
+
+### 5. `translation_mapper.py`
+
+Maps translation entries to their context, including glossary matches. This script prints the mapped data to standard output.
+
+```bash
+python tool/translation_mapper.py
 ```
 
 ## Output Structure

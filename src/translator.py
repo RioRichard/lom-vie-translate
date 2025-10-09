@@ -29,7 +29,7 @@ def get_model():
 
 def translate_text(text, thread_idx=None, name=None, prompt_data=None, name_to_translated=None, original_to_translated=None):
     from src.utils import postprocess_text, special_chars
-    from src.grossary import get_translated_by_name, find_original_matches
+    from src.glossary import get_translated_by_name, find_original_matches
 
     # Handle special characters and glossary lookups
     if text.strip() in special_chars or text in special_chars:
@@ -39,14 +39,14 @@ def translate_text(text, thread_idx=None, name=None, prompt_data=None, name_to_t
     # If no prompt_data provided, fall back to basic glossary lookup
     if not prompt_data:
         if name and name_to_translated:
-            grossary_result = get_translated_by_name(name, name_to_translated)
-            if grossary_result:
-                logger.debug(f"Glossary match by name: {name} -> {grossary_result}")
-                return grossary_result
+            glossary_result = get_translated_by_name(name, name_to_translated)
+            if glossary_result:
+                logger.debug(f"Glossary match by name: {name} -> {glossary_result}")
+                return glossary_result
         if original_to_translated:
-            grossary_matches = find_original_matches(text, original_to_translated)
-            if grossary_matches:
-                logger.debug(f"Glossary matches found: {grossary_matches}")
+            glossary_matches = find_original_matches(text, original_to_translated)
+            if glossary_matches:
+                logger.debug(f"Glossary matches found: {glossary_matches}")
 
     # Use prepared prompt if available, otherwise use default translation prompt
     if prompt_data and 'prompt' in prompt_data:

@@ -21,7 +21,7 @@ BASE_DIR = os.getenv('BASE_DIR', os.path.dirname(os.path.dirname(os.path.abspath
 INPUT_DIR = os.getenv('INPUT_DIR', os.path.join(BASE_DIR, 'Resource/LeanLocalJson'))
 OUTPUT_DIR = os.getenv('OUTPUT_DIR', os.path.join(BASE_DIR, 'translated_output'))
 IMPROVE_DIR = os.getenv('IMPROVE_DIR', os.path.join(BASE_DIR, 'improved_output'))
-GROSSARY_DIR = os.getenv('GROSSARY_DIR', os.path.join(BASE_DIR, 'Resource/grossary'))
+GLOSSARY_DIR = os.getenv('GLOSSARY_DIR', os.path.join(BASE_DIR, 'Resource/glossary'))
 
 # Mode Configuration
 VALID_MODES = ['translate', 'improve']

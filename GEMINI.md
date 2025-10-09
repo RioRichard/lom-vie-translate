@@ -12,7 +12,25 @@ This project is a specialized tool for translating game text from Chinese (Simpl
     ```bash
     cp .env.template .env
     ```
-    Edit `.env` with your specific configurations, including `API_KEYS`, `GOOGLE_STUDIO_AI_LLM`, rate limiting, and directory paths such as `INPUT_DIR`, `OUTPUT_DIR`, `IMPROVE_DIR`, and `GROSSARY_DIR`.
+    Edit `.env` with your specific configurations. Example:
+    ```env
+    # API Keys (comma-separated)
+    API_KEYS=your-api-key-1,your-api-key-2,your-api-key-3
+
+    # Model Settings
+    GOOGLE_STUDIO_AI_LLM=gemma-3-27b-it
+
+    # Rate Limiting and Concurrency
+    RATE_LIMIT_DELAY=2
+    RATE_LIMIT_IF_QUOTA_EXCEEDED=60
+    MAX_CONCURRENT=5
+
+    # Directory Configuration (paths are relative to project root)
+    INPUT_DIR=Resource/LeanLocalJson
+    OUTPUT_DIR=translated_output
+    IMPROVE_DIR=improved_output
+    GLOSSARY_DIR=Resource/glossary
+    ```
 
 2.  **Install Dependencies:**
     ```bash
@@ -48,19 +66,20 @@ python src/main.py \
     --output-dir /path/to/base_output \
     --json-output-dir /path/to/json_output (optional, defaults to --output-dir/json) \
     --details-output-dir /path/to/details_output (optional, defaults to --output-dir/details) \
-    --pairs-output-dir /path/to/pairs_output (optional, defaults to --output-dir/pairs)
+    --pairs-output-dir /path/to/pairs_output (optional, defaults to --output-dir/pairs) \
+    --glossary-file /path/to/your_glossary.json (optional)
 ```
 
 ## Tool Usage
 
 The `tool/` scripts provide additional utilities for processing JSON files. These scripts now require input and output directories to be specified as command-line arguments.
 
-### 1. `create_grossary.py`
+### 1. `create_glossary.py`
 
 Aggregates original and translated JSON files into a glossary.
 
 ```bash
-python tool/create_grossary.py --src_folder /path/to/original_jsons --tgt_folder /path/to/translated_jsons --output_json /path/to/output_glossary.json --output_txt /path/to/output_glossary.txt
+python tool/create_glossary.py --src_folder /path/to/original_jsons --tgt_folder /path/to/translated_jsons --output_json /path/to/output_glossary.json --output_txt /path/to/output_glossary.txt
 ```
 
 ### 2. `filter_entries_by_category.py`
@@ -85,6 +104,14 @@ Converts old `translation_details.json` files (dictionary format) to the new lis
 
 ```bash
 python tool/convert_translation_details.py --input_file /path/to/old_translation_details.json --output_file /path/to/new_translation_details.json
+```
+
+### 5. `translation_mapper.py`
+
+Maps translation entries to their context, including glossary matches. This script prints the mapped data to standard output.
+
+```bash
+python tool/translation_mapper.py
 ```
 
 # Development Conventions
