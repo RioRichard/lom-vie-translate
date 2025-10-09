@@ -33,10 +33,14 @@ def build_app():
         '--onefile',
         '--name=GameTextTranslator',
         f'--add-data={env_file}{os.pathsep}.',
-        f'--add-data={resource_dir}{os.pathsep}Resource',
         '--distpath', dist_dir,
         '--workpath', build_dir,
     ]
+
+    if os.path.exists(resource_dir):
+        pyinstaller_args.append(f'--add-data={resource_dir}{os.pathsep}Resource')
+    else:
+        print(f"[WARNING] Resource directory not found at {resource_dir}. Skipping adding it to the build. This might cause issues if input/glossary files are expected.")
 
     print(f"Running PyInstaller with arguments: {pyinstaller_args}")
     PyInstaller.__main__.run(pyinstaller_args)
