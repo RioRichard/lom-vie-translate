@@ -1,8 +1,6 @@
 import json
-import time
 from pathlib import Path
 import aiofiles
-import asyncio
 from src.glossary import find_original_matches
 from src.logger import logger
 

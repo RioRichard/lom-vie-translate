@@ -22,7 +22,7 @@ async def file_producer(file_paths, queue, semaphore, progress_bar):
     tasks = [read_file_and_put_in_queue(file_path) for file_path in file_paths]
     await asyncio.gather(*tasks)
 
-async def file_consumer(queue, all_data_dict, translation_pairs, mode, translated_dir, json_output_dir, name_to_translated, original_to_translated, progress_bar):
+async def file_consumer(queue, all_data_dict, translation_pairs, mode, translated_dir, json_output_dir, original_to_translated, progress_bar):
     while True:
         file_path, file_content = await queue.get()
         try:
@@ -35,7 +35,6 @@ async def file_consumer(queue, all_data_dict, translation_pairs, mode, translate
                 mode=mode,
                 translated_dir=translated_dir,
                 json_output_dir=json_output_dir,
-                name_to_translated=name_to_translated,
                 original_to_translated=original_to_translated
             )
             progress_bar.update(1) # Update after file is fully processed
@@ -144,7 +143,7 @@ async def main_async():
     translation_pairs = OrderedDict()
 
     # Load glossary once
-    name_to_translated, original_to_translated = load_glossary(args.glossary_file)
+    _, original_to_translated = load_glossary(args.glossary_file)
 
     file_paths = list(json_dir.glob("*.json"))
     total_files = len(file_paths)
@@ -162,7 +161,6 @@ async def main_async():
             args.mode,
             translated_dir,
             json_output_dir,
-            name_to_translated,
             original_to_translated,
             progress_bar # Pass progress_bar to consumer
         ))

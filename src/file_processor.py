@@ -6,10 +6,10 @@ from tqdm.asyncio import tqdm as async_tqdm
 from src.translator import translate_text
 from src.prompt_preparer import prepare_prompt_data
 from src.config import MAX_CONCURRENT, OUTPUT_DIR
+import re
 
 
-
-async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, name_to_translated=None, original_to_translated=None):
+async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, original_to_translated=None):
     """Process a single entry for translation or improvement
 
     Args:
@@ -17,7 +17,6 @@ async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=No
         thread_idx: Thread index for concurrent processing
         mode: 'translate' for fresh translation or 'improve' for improving existing translations
         prompt_data: Pre-prepared prompt data containing context and templates, including raw_translation for improve mode
-        name_to_translated (dict, optional): Glossary map from name to translated text.
         original_to_translated (dict, optional): Glossary map from original text to translated text.
 
     Returns:
@@ -57,7 +56,6 @@ async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=No
         thread_idx=thread_idx,
         name=name,
         prompt_data=prompt_data,
-        name_to_translated=name_to_translated,
         original_to_translated=original_to_translated
     )
 
@@ -119,12 +117,21 @@ async def process_json_file(file_path, file_content, all_data_dict, translation_
 
     try:
         file_start = time.time()
+
+        # Quick check for language using regex to avoid full JSON parsing if not ChineseSimplified
+        if not re.search(r'"Language"\s*:\s*"ChineseSimplified"', file_content):
+            async with aiofiles.open(output_path, 'w', encoding='utf-8') as f:
+                await f.write(json.dumps(json.loads(file_content), ensure_ascii=False, indent=2))
+            async_tqdm.write(f"Skipped non-ChineseSimplified file: {file_name} (Language: Not ChineseSimplified detected by regex)")
+            return
+
         data = json.loads(file_content)
         language = data.get('Language')
         if language != 'ChineseSimplified':
+            # This block should ideally not be reached if regex is accurate, but kept as a fallback
             async with aiofiles.open(output_path, 'w', encoding='utf-8') as f:
                 await f.write(json.dumps(data, ensure_ascii=False, indent=2))
-            async_tqdm.write(f"Skipped non-ChineseSimplified file: {file_name} (Language: {language})") # Use tqdm.write
+            async_tqdm.write(f"Skipped non-ChineseSimplified file: {file_name} (Language: {language} - Fallback check)")
             return
 
         # Prepare prompts with appropriate templates and context
@@ -151,7 +158,6 @@ async def process_json_file(file_path, file_content, all_data_dict, translation_
                 thread_idx=idx,
                 mode=mode,
                 prompt_data=prompt,
-                name_to_translated=name_to_translated,
                 original_to_translated=original_to_translated
             )
 
