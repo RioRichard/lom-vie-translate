@@ -75,8 +75,54 @@ def load_glossary(glossary_file_path=None):
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in glossary file {file}: {str(e)}")
         except Exception as e:
-            logger.error(f"Failed to process glossary file {file}: {str(e)}", exc_info=True)
+            logger.error(f"Failed to process glossary file {file}: {str(e)}")
     return name_to_translated, original_to_translated
+
+def load_old_translations(input_dir, translated_dir):
+    """Load old translations by comparing input and translated directories."""
+    old_translations_map = {}
+    input_path = Path(input_dir)
+    translated_path = Path(translated_dir)
+
+    if not translated_path.exists():
+        logger.warning(f"Translated directory not found: {translated_dir}")
+        return old_translations_map
+
+    def _parse_entries(data):
+        entries = data.get('entries', [])
+        if isinstance(entries, dict) and 'Array' in entries:
+            return entries['Array']
+        return entries if isinstance(entries, list) else []
+
+    for t_file in translated_path.glob("*.json"):
+        o_file = input_path / t_file.name
+        if not o_file.exists():
+            continue
+
+        try:
+            with open(o_file, 'r', encoding='utf-8') as f:
+                o_data = json.load(f)
+            with open(t_file, 'r', encoding='utf-8') as f:
+                t_data = json.load(f)
+
+            o_entries = _parse_entries(o_data)
+            t_entries = _parse_entries(t_data)
+
+            t_map = { (e.get('key') or e.get('Name')): (e.get('value') or e.get('Text', '')) for e in t_entries }
+
+            for o_entry in o_entries:
+                name = o_entry.get('key') or o_entry.get('Name')
+                original_text = (o_entry.get('value') or o_entry.get('Text', '')).strip()
+                if name in t_map:
+                    translated_text = t_map[name].strip()
+                    if original_text and translated_text:
+                        old_translations_map[original_text] = translated_text
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in old translation file pair ({o_file.name}, {t_file.name}): {e}")
+        except Exception as e:
+            logger.error(f"Failed to process old translation file pair ({o_file.name}, {t_file.name}): {e}")
+
+    return old_translations_map
 
 def get_translated_by_name(name, name_to_translated):
     return name_to_translated.get(name)

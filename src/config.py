@@ -8,13 +8,15 @@ _raw_api_keys = os.getenv('API_KEYS', '')
 API_KEYS = [key.strip() for key in _raw_api_keys.split(',') if key.strip()] if _raw_api_keys else []
 if not API_KEYS:
     raise ValueError("No API keys found. Please set the API_KEYS environment variable.")
-GOOGLE_STUDIO_AI_LLM = os.getenv('GOOGLE_STUDIO_AI_LLM', 'gemma-3-27b-it')
+PRIMARY_LLM_MODEL = os.getenv('PRIMARY_LLM_MODEL', 'gemma-3-27b-it')
+_raw_fallback_models = os.getenv('FALLBACK_LLM_MODELS', '')
+FALLBACK_LLM_MODELS = [model.strip() for model in _raw_fallback_models.split(',') if model.strip()]
 
 # Rate Limiting and Concurrency
 RATE_LIMIT_DELAY = float(os.getenv('RATE_LIMIT_DELAY', '2'))
 RATE_LIMIT_IF_QUOTA_EXCEEDED = float(os.getenv('RATE_LIMIT_IF_QUOTA_EXCEEDED', '60'))
 MAX_CONCURRENT = int(os.getenv('MAX_CONCURRENT', '5'))
-MAX_CONCURRENT_FILE_OPENS = int(os.getenv('MAX_CONCURRENT_FILE_OPENS', '20'))
+MAX_CONCURRENT_FILE_OPENS = int(os.getenv('MAX_CONCURRENT_FILE_OPENS', '999'))
 
 # Directory Configuration
 BASE_DIR = os.getenv('BASE_DIR', os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

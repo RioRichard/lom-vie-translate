@@ -2,14 +2,14 @@ import json
 import time
 from pathlib import Path
 import aiofiles
+import asyncio
 from tqdm.asyncio import tqdm as async_tqdm
 from src.translator import translate_text
 from src.prompt_preparer import prepare_prompt_data
 from src.config import MAX_CONCURRENT, OUTPUT_DIR
-import re
 
 
-async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, original_to_translated=None):
+async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, original_to_translated=None, old_translations=None):
     """Process a single entry for translation or improvement
 
     Args:
@@ -35,23 +35,20 @@ async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=No
         async_tqdm.write(f"[DEBUG] Skipping empty text for entry: {name}")
         return entry
 
-    # Check for glossary match by Original text
+    # Check for existing translation (glossary or old) by Original text
     if original_to_translated:
-        glossary_translated_by_original = original_to_translated.get(original_text)
-        if glossary_translated_by_original:
-            async_tqdm.write(f"[INFO] Reusing glossary translation for original text: '{original_text}' -> '{glossary_translated_by_original}'")
+        existing_translation = original_to_translated.get(original_text)
+        if existing_translation:
+            async_tqdm.write(f"[INFO] Reusing existing translation for original text: '{original_text}' -> '{existing_translation}'")
             return {
                 'Name': name,
-                'Text': glossary_translated_by_original
+                'Text': existing_translation
             }
 
     # Start translation
     line_start = time.time()
 
-    async_tqdm.write(f"[DEBUG] Type of prompt_data in process_entry: {type(prompt_data)}")
-    async_tqdm.write(f"[DEBUG] Content of prompt_data in process_entry: {prompt_data}")
-
-    translated_text = translate_text(
+    translated_text = await translate_text(
         text=original_text,
         thread_idx=thread_idx,
         name=name,
@@ -85,12 +82,13 @@ async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=No
         'Text': translated_text
     }
 
-async def process_json_file(file_path, file_content, all_data_dict, translation_pairs, mode='translate', translated_dir=None, json_output_dir=None, name_to_translated=None, original_to_translated=None):
+async def process_json_file(file_path, file_content, translated_file_content, all_data_dict, translation_pairs, mode='translate', translated_dir=None, json_output_dir=None, original_to_translated=None, old_translations=None):
     """Process a JSON file for translation or improvement
 
     Args:
         file_path: Path to the input JSON file
         file_content: Content of the input JSON file
+        translated_file_content: Content of the raw translated JSON file (for improve mode)
         all_data_dict: Dictionary to store detailed translation data including original and raw translations
         translation_pairs: List to store original=translation pairs for txt output
         mode: 'translate' for fresh translation or 'improve' for improving existing translations
@@ -118,70 +116,40 @@ async def process_json_file(file_path, file_content, all_data_dict, translation_
     try:
         file_start = time.time()
 
-        # Quick check for language using regex to avoid full JSON parsing if not ChineseSimplified
-        if not re.search(r'"Language"\s*:\s*"ChineseSimplified"', file_content):
-            async with aiofiles.open(output_path, 'w', encoding='utf-8') as f:
-                await f.write(json.dumps(json.loads(file_content), ensure_ascii=False, indent=2))
-            async_tqdm.write(f"Skipped non-ChineseSimplified file: {file_name} (Language: Not ChineseSimplified detected by regex)")
-            return
+        data = json.loads(file_content) # Parse JSON once
 
-        data = json.loads(file_content)
-        language = data.get('Language')
-        if language != 'ChineseSimplified':
-            # This block should ideally not be reached if regex is accurate, but kept as a fallback
-            async with aiofiles.open(output_path, 'w', encoding='utf-8') as f:
-                await f.write(json.dumps(data, ensure_ascii=False, indent=2))
-            async_tqdm.write(f"Skipped non-ChineseSimplified file: {file_name} (Language: {language} - Fallback check)")
+        if await _check_and_handle_skipped_language(file_name, data, output_path):
             return
 
         # Prepare prompts with appropriate templates and context
         prompt_data_list, old_translated_file_data = await prepare_prompt_data(
             original_file_path=file_path,
             original_data=data,
-            translated_dir=translated_dir if mode == 'improve' else None,
+            translated_file_content=translated_file_content if mode == 'improve' else None,
             original_to_translated=original_to_translated
         )
-        entries = data.get('entries', [])
-        if isinstance(entries, dict) and 'Array' in entries:
-            entries_list = entries['Array']
-            is_array_format = True
-        else:
-            entries_list = entries
-            is_array_format = False
+        entries_list, is_array_format = _parse_json_entries(data)
         # Process all entries concurrently
         async_tqdm.write(f"[INFO] Processing {len(entries_list)} entries with {MAX_CONCURRENT} concurrent workers")
 
+        tasks = _create_translation_tasks(entries_list, prompt_data_list)
+
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+
         async def safe_process_entry_with_delay(args):
             entry, idx, prompt = args
-            return await process_entry(
-                entry=entry,
-                thread_idx=idx,
-                mode=mode,
-                prompt_data=prompt,
-                original_to_translated=original_to_translated
-            )
+            async with semaphore:
+                return await process_entry(
+                    entry=entry,
+                    thread_idx=idx,
+                    mode=mode,
+                    prompt_data=prompt,
+                    original_to_translated=original_to_translated,
+                    old_translations=old_translations
+                )
 
-        # Create list of tasks with their corresponding prompts
-        if len(prompt_data_list) != len(entries_list):
-            async_tqdm.write(f"[WARNING] Number of prompts ({len(prompt_data_list)}) doesn't match number of entries ({len(entries_list)})")
-            async_tqdm.write(f"[DEBUG] Entries list: {entries_list}")
-            async_tqdm.write(f"[DEBUG] Prompt data list: {prompt_data_list}")
-
-        tasks = []
-        for idx, entry in enumerate(entries_list):
-            prompt = prompt_data_list[idx] if idx < len(prompt_data_list) else {
-                'name': entry.get('key', '') or entry.get('Name', ''),
-                'original_text': entry.get('value', '') or entry.get('Text', '').strip(),
-                'glossary_matches': [],
-                'raw_translation': None,
-                'prompt': None  # Will use default prompt in translator
-            }
-            tasks.append((entry, idx, prompt))
-
-        # Process all entries sequentially with tqdm progress bar
-        translations = []
-        for idx, task in enumerate(async_tqdm(tasks, desc=f"Entries in {file_name}", leave=False, mininterval=0.1)):
-            translations.append(await safe_process_entry_with_delay(task))
+        # Process all entries concurrently with tqdm progress bar
+        translations = await async_tqdm.gather(*[safe_process_entry_with_delay(task) for task in tasks], desc=f"Entries in {file_name}", leave=False, mininterval=0.1)
 
         if is_array_format:
             data['entries']['Array'] = translations
@@ -189,44 +157,88 @@ async def process_json_file(file_path, file_content, all_data_dict, translation_
             data['entries'] = translations
         async with aiofiles.open(output_path, 'w', encoding='utf-8') as f:
             await f.write(json.dumps(data, ensure_ascii=False, indent=2))
-        # Store translation data
-        for entry, original_entry in zip(translations, entries_list):
-            name = entry.get('Name')
-            original_text = original_entry.get('Text', '').strip()
-            final_text = entry.get('Text', '').strip()
 
-            if name and original_text and final_text:
-                # Create a dictionary for the current entry
-                entry_details = {
-                    'Name': name,
-                    'Original': original_text,
-                    'Translated': final_text
-                }
+        await _process_and_store_results(
+            file_name=file_name,
+            translations=translations,
+            original_entries=entries_list,
+            all_data_dict=all_data_dict,
+            translation_pairs=translation_pairs,
+            mode=mode,
+            translated_file_content=translated_file_content
+        )
 
-                if mode == 'improve' and translated_dir:
-                    # Find raw translation if in improve mode
-                    raw_translation = None
-                    trans_path = Path(translated_dir) / file_name
-                    if trans_path.exists():
-                        async with aiofiles.open(trans_path, 'r', encoding='utf-8') as f:
-                            trans_data = json.loads(await f.read())
-                            trans_entries = trans_data.get('entries', {}).get('Array', [])
-                            for trans_entry in trans_entries:
-                                if trans_entry.get('Name') == name:
-                                    raw_translation = trans_entry.get('Text', '').strip()
-                                    break
-                    if raw_translation:
-                        entry_details['Raw'] = raw_translation
-
-                # Append the entry details to the all_data_dict list
-                all_data_dict.append(entry_details)
-
-                # Store as original=translation pair for txt output, escaping newlines
-                escaped_original = original_text.replace('\r', '\\r').replace('\n', '\\n')
-                escaped_final = final_text.replace('\r', '\\r').replace('\n', '\\n')
-                if escaped_original not in translation_pairs:
-                    translation_pairs[escaped_original] = escaped_final
         file_end = time.time()
         async_tqdm.write(f"[INFO] Completed {file_name} - {len(translations)} translations in {file_end - file_start:.2f}s")
     except Exception as e:
-        async_tqdm.write(f"[ERROR] Error processing {file_name}: {str(e)}", exc_info=True)
+        async_tqdm.write(f"[ERROR] Error processing {file_name}: {str(e)}")
+
+async def _check_and_handle_skipped_language(file_name, data, output_path):
+    language = data.get('Language')
+    if language != 'ChineseSimplified':
+        async with aiofiles.open(output_path, 'w', encoding='utf-8') as f:
+            await f.write(json.dumps(data, ensure_ascii=False, indent=2))
+        async_tqdm.write(f"Skipped non-ChineseSimplified file: {file_name} (Language: {language})")
+        return True
+    return False
+
+def _parse_json_entries(data):
+    entries = data.get('entries', [])
+    if isinstance(entries, dict) and 'Array' in entries:
+        entries_list = entries['Array']
+        is_array_format = True
+    else:
+        entries_list = entries
+        is_array_format = False
+    return entries_list, is_array_format
+
+def _create_translation_tasks(entries_list, prompt_data_list):
+    if len(prompt_data_list) != len(entries_list):
+        async_tqdm.write(f"[WARNING] Number of prompts ({len(prompt_data_list)}) doesn't match number of entries ({len(entries_list)})")
+        async_tqdm.write(f"[DEBUG] Entries list: {entries_list}")
+        async_tqdm.write(f"[DEBUG] Prompt data list: {prompt_data_list}")
+
+    tasks = []
+    for idx, entry in enumerate(entries_list):
+        prompt = prompt_data_list[idx] if idx < len(prompt_data_list) else {
+            'name': entry.get('key', '') or entry.get('Name', ''),
+            'original_text': entry.get('value', '') or entry.get('Text', '').strip(),
+            'glossary_matches': [],
+            'raw_translation': None,
+            'prompt': None  # Will use default prompt in translator
+        }
+        tasks.append((entry, idx, prompt))
+    return tasks
+
+async def _process_and_store_results(file_name, translations, original_entries, all_data_dict, translation_pairs, mode, translated_file_content):
+    raw_translation_data = None
+    if translated_file_content:
+        try:
+            raw_translation_data = json.loads(translated_file_content)
+        except json.JSONDecodeError:
+            async_tqdm.write(f"[ERROR] Could not parse raw translated file content for {file_name}")
+
+    for entry, original_entry in zip(translations, original_entries):
+        name = entry.get('Name')
+        original_text = original_entry.get('Text', '').strip()
+        final_text = entry.get('Text', '').strip()
+
+        if name and original_text and final_text:
+            entry_details = {
+                'Name': name,
+                'Original': original_text,
+                'Translated': final_text
+            }
+
+            if mode == 'improve' and raw_translation_data:
+                for trans_entry in raw_translation_data.get('entries', {}).get('Array', []):
+                    if trans_entry.get('Name') == name:
+                        entry_details['Raw'] = trans_entry.get('Text', '').strip()
+                        break
+
+            all_data_dict.append(entry_details)
+
+            escaped_original = original_text.replace('\r', '\\r').replace('\n', '\\n')
+            escaped_final = final_text.replace('\r', '\\r').replace('\n', '\\n')
+            if escaped_original not in translation_pairs:
+                translation_pairs[escaped_original] = escaped_final

@@ -38,7 +38,7 @@ class TranslationLogger:
     def translation(self, msg, *args, **kwargs):
         """Log translation-specific information"""
         self.logger.log(TRANSLATION, msg, *args, **kwargs)
-        tqdm.write(f"[TRANSLATION] {msg}", *args, **kwargs)
+        tqdm.write(f"[TRANSLATION] {msg}", *args, **kwargs, nolock=False)
 
     def debug(self, msg, *args, **kwargs):
         """Log detailed information for debugging"""
@@ -47,17 +47,17 @@ class TranslationLogger:
     def info(self, msg, *args, **kwargs):
         """Log general information about program execution"""
         self.logger.info(msg, *args, **kwargs)
-        tqdm.write(msg, *args, **kwargs)
+        tqdm.write(msg, *args, **kwargs,nolock=False)
 
     def warning(self, msg, *args, **kwargs):
         """Log warnings about potential issues"""
         self.logger.warning(msg, *args, **kwargs)
-        tqdm.write(f"[WARNING] {msg}", *args, **kwargs)
+        tqdm.write(f"[WARNING] {msg}", *args, **kwargs,nolock=False)
 
     def error(self, msg, *args, **kwargs):
         """Log errors that don't stop program execution"""
         self.logger.error(msg, *args, **kwargs)
-        tqdm.write(f"[ERROR] {msg}", *args, **kwargs)
+        tqdm.write(f"[ERROR] {msg}", *args, **kwargs,nolock=False)
 
     def critical(self, msg, *args, **kwargs):
         """Log critical errors that might stop program execution"""
@@ -98,18 +98,18 @@ class TranslationLogger:
             f"    Total Time: {total_time:.2f}s"
         )
 
-    def api_call(self, key_index, api_key):
-        """Log API key usage"""
+    def api_call(self, key_index, api_key, model_name):
+        """Log API key and model usage"""
         masked_key = f"{api_key[:10]}...{api_key[-4:]}"
-        self.debug(f"Using API key {key_index}: {masked_key}")
+        self.debug(f"Using Model: {model_name}, API key {key_index}: {masked_key}")
 
-    def translation_start(self, name, text):
+    def translation_start(self, name, text, model_name):
         """Log the start of a translation"""
-        self.debug(f"Starting translation for {name}: {text[:50]}...")
+        self.debug(f"Starting translation for {name} with Model {model_name}: {text[:50]}...")
 
-    def translation_output(self, text, duration):
+    def translation_output(self, text, duration, model_name):
         """Log translation output"""
-        self.debug(f"Translation completed in {duration:.2f}s")
+        self.debug(f"Translation with Model {model_name} completed in {duration:.2f}s")
         self.debug(f"Output: {text}")
 
     def concurrent_info(self, count, workers):

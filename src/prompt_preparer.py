@@ -1,10 +1,8 @@
 import json
-from pathlib import Path
-import aiofiles
 from src.glossary import find_original_matches
 from src.logger import logger
 
-async def prepare_prompt_data(original_file_path, original_data, translated_dir=None, original_to_translated=None):
+async def prepare_prompt_data(original_file_path, original_data, translated_file_content=None, original_to_translated=None):
     """
     Prepare translation prompts using:
     - name (key) and text from original file
@@ -23,20 +21,21 @@ async def prepare_prompt_data(original_file_path, original_data, translated_dir=
 
     logger.debug(f"Original entries for {original_file_path.name}: {original_entries}")
 
-    # If translated_dir provided, try to find existing translations
-    translated_file = None
-    if translated_dir:
-        file_name = Path(original_file_path).name
-        trans_path = Path(translated_dir) / file_name
-        if trans_path.exists():
-            async with aiofiles.open(trans_path, 'r', encoding='utf-8') as f:
-                trans_content = await f.read()
-                translated_data = json.loads(trans_content)
-                entries = translated_data.get('entries', [])
-                if isinstance(entries, dict) and 'Array' in entries:
-                    translated_file = entries['Array']
-                else:
-                    translated_file = entries
+    # If translated_file_content provided, parse it
+    translated_data = None
+    if translated_file_content:
+        try:
+            translated_data = json.loads(translated_file_content)
+        except json.JSONDecodeError:
+            logger.error(f"Could not parse translated file content for {original_file_path.name}")
+
+    translated_file_entries = None
+    if translated_data:
+        entries = translated_data.get('entries', [])
+        if isinstance(entries, dict) and 'Array' in entries:
+            translated_file_entries = entries['Array']
+        else:
+            translated_file_entries = entries
 
     prompt_data = []
     for entry in original_entries:
@@ -50,8 +49,8 @@ async def prepare_prompt_data(original_file_path, original_data, translated_dir=
 
         # Check if we have a raw translation by name
         raw_translation = None
-        if translated_file:
-            for trans_entry in translated_file:
+        if translated_file_entries:
+            for trans_entry in translated_file_entries:
                 trans_name = trans_entry.get('key', '') or trans_entry.get('Name', '')
                 if trans_name == name:
                     raw_translation = trans_entry.get('value', '') or trans_entry.get('Text', '')
@@ -111,4 +110,4 @@ Nhiệm vụ của bạn là:
         })
 
     logger.debug(f"Generated prompt data list: {prompt_data}")
-    return prompt_data, translated_file
+    return prompt_data, translated_file_entries
