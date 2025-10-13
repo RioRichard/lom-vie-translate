@@ -248,3 +248,5 @@ Simple text file with original=translation pairs:
 - Special attention is given to short phrases and game terminology
 - Concurrent processing is used to optimize performance
 - Logging system provides detailed progress and error tracking
+- **Consistent Logging:** All logging now uses the `src/logger.py` instance for better consistency and file output.
+- **Robust API Handling:** The `src/translator.py` now includes robust API key rotation and fallback model mechanisms to enhance reliability and handle rate limits or quota issues more gracefully.

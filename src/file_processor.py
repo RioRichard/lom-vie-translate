@@ -7,9 +7,11 @@ from tqdm.asyncio import tqdm as async_tqdm
 from src.translator import translate_text
 from src.prompt_preparer import prepare_prompt_data
 from src.config import MAX_CONCURRENT, OUTPUT_DIR
+from src.utils import SPECIAL_CHARS
+from src.logger import logger
 
 
-async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, original_to_translated=None, old_translations=None):
+async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, glossary_text=None, translation_cache=None, run_stats=None):
     """Process a single entry for translation or improvement
 
     Args:
@@ -17,14 +19,16 @@ async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=No
         thread_idx: Thread index for concurrent processing
         mode: 'translate' for fresh translation or 'improve' for improving existing translations
         prompt_data: Pre-prepared prompt data containing context and templates, including raw_translation for improve mode
-        original_to_translated (dict, optional): Glossary map from original text to translated text.
+        glossary_text (dict, optional): Glossary map from original text to translated text.
+        translation_cache (dict, optional): Cache of previously translated text.
+        run_stats (dict, optional): Dictionary to store run statistics.
 
     Returns:
         dict: The processed entry with translated text
     """
     # Ensure we have the required fields
     if 'Name' not in entry or 'Text' not in entry:
-        async_tqdm.write(f"[WARNING] Entry missing required fields: {entry}")
+        logger.warning(f"Entry missing required fields: {entry}")
         return entry
 
     name = entry['Name']
@@ -32,14 +36,40 @@ async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=No
 
     # Skip empty text
     if not original_text:
-        async_tqdm.write(f"[DEBUG] Skipping empty text for entry: {name}")
+        logger.debug(f"Skipping empty text for entry: {name}")
+        if run_stats:
+            run_stats["empty"] += 1
         return entry
 
-    # Check for existing translation (glossary or old) by Original text
-    if original_to_translated:
-        existing_translation = original_to_translated.get(original_text)
+    # Skip special characters
+    if original_text in SPECIAL_CHARS:
+        logger.debug(f"Skipping special character: {original_text}")
+        if run_stats:
+            run_stats["special_chars"] += 1
+        return {
+            'Name': name,
+            'Text': original_text
+        }
+
+    # 1. Check for old translation (cache) first for performance
+    if translation_cache:
+        cached_translation = translation_cache.get(original_text)
+        if cached_translation:
+            logger.info(f"Reusing old translation for original text: '{original_text}' -> '{cached_translation}'")
+            if run_stats:
+                run_stats["from_cache"] += 1
+            return {
+                'Name': name,
+                'Text': cached_translation
+            }
+
+    # 2. Check for existing translation in glossary (can also act as a cache)
+    if glossary_text:
+        existing_translation = glossary_text.get(original_text)
         if existing_translation:
-            async_tqdm.write(f"[INFO] Reusing existing translation for original text: '{original_text}' -> '{existing_translation}'")
+            logger.info(f"Reusing glossary for original text: '{original_text}' -> '{existing_translation}'")
+            if run_stats:
+                run_stats["from_glossary"] += 1
             return {
                 'Name': name,
                 'Text': existing_translation
@@ -53,7 +83,7 @@ async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=No
         thread_idx=thread_idx,
         name=name,
         prompt_data=prompt_data,
-        original_to_translated=original_to_translated
+        original_to_translated=glossary_text
     )
 
     # await asyncio.sleep(RATE_LIMIT_DELAY)
@@ -62,19 +92,14 @@ async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=No
     # Log the translation with raw translation if available in improve mode
     raw_translation = prompt_data.get('raw_translation') if prompt_data else None
 
-    action = "Translation" if mode == 'translate' else "Improvement"
-    message = (
-        f"{action} completed in {line_end - line_start:.2f}s\n"
-        f"    Name: {name}\n"
-        f"    Original: {original_text}\n"
+    logger.translation_detail(
+        name=name,
+        original=original_text,
+        translated=translated_text,
+        duration=line_end - line_start,
+        raw_translation=raw_translation,
+        mode=mode
     )
-
-    if mode == 'improve' and raw_translation:
-        message += f"    Raw Translation: {raw_translation}\n"
-
-    message += f"    Final Output: {translated_text}"
-
-    async_tqdm.write(message)
 
     # Return entry with same structure but translated text
     return {
@@ -82,7 +107,7 @@ async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=No
         'Text': translated_text
     }
 
-async def process_json_file(file_path, file_content, translated_file_content, all_data_dict, translation_pairs, mode='translate', translated_dir=None, json_output_dir=None, original_to_translated=None, old_translations=None):
+async def process_json_file(file_path, file_content, translated_file_content, all_data_dict, translation_pairs, mode='translate', translated_dir=None, json_output_dir=None, glossary_text=None, translation_cache=None, run_stats=None):
     """Process a JSON file for translation or improvement
 
     Args:
@@ -94,16 +119,14 @@ async def process_json_file(file_path, file_content, translated_file_content, al
         mode: 'translate' for fresh translation or 'improve' for improving existing translations
         translated_dir: Directory containing existing translations (required for improve mode)
         json_output_dir: Directory for individual translated JSON files (defaults to OUTPUT_DIR/json)
-        old_version_dir (Path, optional): Directory containing old version translations for reuse.
-        glossary_file_path (str, optional): Path to a specific glossary file to use.
+        glossary_text (dict, optional): Glossary map from original text to translated text.
+        translation_cache (dict, optional): Cached translations from previous runs.
+        run_stats (dict, optional): Dictionary to store run statistics.
 
     Raises:
         ValueError: If mode is invalid or if translated_dir is missing in improve mode
     """
-    from src.config import VALID_MODES
 
-    if mode not in VALID_MODES:
-        raise ValueError(f"Invalid mode: {mode}. Must be one of {VALID_MODES}")
 
     if mode == 'improve' and not translated_dir:
         raise ValueError("translated_dir is required when using improve mode")
@@ -118,38 +141,39 @@ async def process_json_file(file_path, file_content, translated_file_content, al
 
         data = json.loads(file_content) # Parse JSON once
 
-        if await _check_and_handle_skipped_language(file_name, data, output_path):
-            return
-
         # Prepare prompts with appropriate templates and context
         prompt_data_list, old_translated_file_data = await prepare_prompt_data(
             original_file_path=file_path,
             original_data=data,
             translated_file_content=translated_file_content if mode == 'improve' else None,
-            original_to_translated=original_to_translated
+            original_to_translated=glossary_text
         )
         entries_list, is_array_format = _parse_json_entries(data)
         # Process all entries concurrently
-        async_tqdm.write(f"[INFO] Processing {len(entries_list)} entries with {MAX_CONCURRENT} concurrent workers")
+        logger.concurrent_info(len(entries_list), MAX_CONCURRENT)
 
         tasks = _create_translation_tasks(entries_list, prompt_data_list)
-
         semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+        pbar = async_tqdm(total=len(tasks), desc=f"Entries in {file_name}", leave=False, mininterval=0.1)
 
         async def safe_process_entry_with_delay(args):
             entry, idx, prompt = args
             async with semaphore:
-                return await process_entry(
+                result = await process_entry(
                     entry=entry,
                     thread_idx=idx,
                     mode=mode,
                     prompt_data=prompt,
-                    original_to_translated=original_to_translated,
-                    old_translations=old_translations
+                    glossary_text=glossary_text,
+                    translation_cache=translation_cache,
+                    run_stats=run_stats
                 )
+                pbar.update(1)
+                return result
 
         # Process all entries concurrently with tqdm progress bar
-        translations = await async_tqdm.gather(*[safe_process_entry_with_delay(task) for task in tasks], desc=f"Entries in {file_name}", leave=False, mininterval=0.1)
+        translations = await asyncio.gather(*[safe_process_entry_with_delay(task) for task in tasks])
+        pbar.close()
 
         if is_array_format:
             data['entries']['Array'] = translations
@@ -169,18 +193,9 @@ async def process_json_file(file_path, file_content, translated_file_content, al
         )
 
         file_end = time.time()
-        async_tqdm.write(f"[INFO] Completed {file_name} - {len(translations)} translations in {file_end - file_start:.2f}s")
+        logger.info(f"Completed {file_name} - {len(translations)} translations in {file_end - file_start:.2f}s")
     except Exception as e:
-        async_tqdm.write(f"[ERROR] Error processing {file_name}: {str(e)}")
-
-async def _check_and_handle_skipped_language(file_name, data, output_path):
-    language = data.get('Language')
-    if language != 'ChineseSimplified':
-        async with aiofiles.open(output_path, 'w', encoding='utf-8') as f:
-            await f.write(json.dumps(data, ensure_ascii=False, indent=2))
-        async_tqdm.write(f"Skipped non-ChineseSimplified file: {file_name} (Language: {language})")
-        return True
-    return False
+        logger.error(f"Error processing {file_name}: {str(e)}")
 
 def _parse_json_entries(data):
     entries = data.get('entries', [])
@@ -194,9 +209,9 @@ def _parse_json_entries(data):
 
 def _create_translation_tasks(entries_list, prompt_data_list):
     if len(prompt_data_list) != len(entries_list):
-        async_tqdm.write(f"[WARNING] Number of prompts ({len(prompt_data_list)}) doesn't match number of entries ({len(entries_list)})")
-        async_tqdm.write(f"[DEBUG] Entries list: {entries_list}")
-        async_tqdm.write(f"[DEBUG] Prompt data list: {prompt_data_list}")
+        logger.warning(f"Number of prompts ({len(prompt_data_list)}) doesn't match number of entries ({len(entries_list)})")
+        logger.debug(f"Entries list: {entries_list}")
+        logger.debug(f"Prompt data list: {prompt_data_list}")
 
     tasks = []
     for idx, entry in enumerate(entries_list):
@@ -216,7 +231,7 @@ async def _process_and_store_results(file_name, translations, original_entries, 
         try:
             raw_translation_data = json.loads(translated_file_content)
         except json.JSONDecodeError:
-            async_tqdm.write(f"[ERROR] Could not parse raw translated file content for {file_name}")
+            logger.error(f"Could not parse raw translated file content for {file_name}")
 
     for entry, original_entry in zip(translations, original_entries):
         name = entry.get('Name')

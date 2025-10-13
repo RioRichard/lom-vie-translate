@@ -10,11 +10,12 @@ def postprocess_text(text, for_json=True):
         # Store as literal \\r and \\n for txt
         return text.replace('\r', '\\r').replace('\n', '\\n')
 
-special_chars = [
+SPECIAL_CHARS = [
     "？？？",
     "{{title}}",
     "???",
     "[{{0}}]",
+    "[{0}]",
     "[|]",
     "[||]",
     "……。",

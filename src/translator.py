@@ -12,9 +12,8 @@ api_key_lock = Lock()
 # Initialize API key rotation
 api_key_cycle = itertools.cycle(API_KEYS)
 
-# Model configuration
 generation_config = {
-    "temperature": 0,    # Most consistent output
+    "temperature": 0,
     "max_output_tokens": 1000,
     "top_p": 1,
     "top_k": 1
@@ -30,13 +29,8 @@ def get_model(model_name):
 
 async def translate_text(text, thread_idx=None, name=None, prompt_data=None, name_to_translated=None, original_to_translated=None):
     global api_key_cycle
-    from src.utils import postprocess_text, special_chars
+    from src.utils import postprocess_text
     from src.glossary import get_translated_by_name, find_original_matches
-
-    # Handle special characters and glossary lookups
-    if text.strip() in special_chars or text in special_chars:
-        logger.debug(f"Special character found: {text.strip()}")
-        return text.strip()
 
     # If no prompt_data provided, fall back to basic glossary lookup
     if not prompt_data:

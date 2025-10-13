@@ -120,3 +120,5 @@ python tool/translation_mapper.py
 *   **Configuration:** Uses a `.env` file for environment-specific settings and `src/config.py` for application configuration.
 *   **Logging:** Includes a dedicated `src/logger.py` for structured logging.
 *   **Modularity:** The project is structured into distinct modules for file processing, glossary management, prompt preparation, and translation engine interfacing.
+*   **Consistent Logging:** All logging now uses the `src/logger.py` instance for better consistency and file output.
+*   **Robust API Handling:** The `src/translator.py` now includes robust API key rotation and fallback model mechanisms to enhance reliability and handle rate limits or quota issues more gracefully.

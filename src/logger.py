@@ -89,14 +89,21 @@ class TranslationLogger:
 
         self.translation(message)
 
-    def run_summary(self, files_processed, total_translations, total_time):
+    def run_summary(self, files_processed, total_translations, total_time, from_cache=0, from_glossary=0, empty_lines=0, special_chars=0):
         """Log a summary of the entire run"""
-        tqdm.write(
+        new_translations = total_translations - from_cache - from_glossary - empty_lines - special_chars
+        summary = (
             f"\nRun Summary:\n"
             f"    Files Processed: {files_processed}\n"
             f"    Total Translations: {total_translations}\n"
+            f"      - From Cache: {from_cache}\n"
+            f"      - From Glossary: {from_glossary}\n"
+            f"      - Empty Lines: {empty_lines}\n"
+            f"      - Special Characters: {special_chars}\n"
+            f"      - New Translations: {new_translations}\n"
             f"    Total Time: {total_time:.2f}s"
         )
+        tqdm.write(summary)
 
     def api_call(self, key_index, api_key, model_name):
         """Log API key and model usage"""

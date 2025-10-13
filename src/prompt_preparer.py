@@ -74,7 +74,7 @@ Nhiệm vụ của bạn là:
             if glossary_matches:
                 prompt.append("\nThuật ngữ cần giữ nguyên hoặc dịch đặc biệt:")
                 for orig, trans in glossary_matches:
-                    prompt.append(f"- {orig}={trans}")
+                    prompt.append(f"\n- {orig}={trans}")
             prompt.append(f"\nVăn bản gốc: {text}")
             prompt.append(f"\nBản dịch hiện tại: {raw_translation}")
 
@@ -96,7 +96,7 @@ Nhiệm vụ của bạn là:
             if glossary_matches:
                 prompt.append("\nThuật ngữ cần giữ nguyên hoặc dịch đặc biệt:")
                 for orig, trans in glossary_matches:
-                    prompt.append(f"- {orig}={trans}")
+                    prompt.append(f"\n- {orig}={trans}")
             prompt.append(f"\nVăn bản cần dịch: {text}")
 
 

@@ -8,9 +8,9 @@ import aiofiles
 from collections import OrderedDict
 from tqdm.asyncio import tqdm as async_tqdm
 from src.file_processor import process_json_file
-from src.config import INPUT_DIR, OUTPUT_DIR, MAX_CONCURRENT_FILE_OPENS
+from src.config import INPUT_DIR, OUTPUT_DIR, MAX_CONCURRENT_FILE_OPENS, VALID_MODES
 from src.logger import logger
-from src.glossary import load_glossary, load_old_translations
+from src.glossary import load_glossary_async, load_old_translations_async
 
 async def file_producer(file_paths, queue, semaphore, progress_bar, mode, translated_dir):
     translated_files_map = {}
@@ -49,9 +49,9 @@ async def file_producer(file_paths, queue, semaphore, progress_bar, mode, transl
 
     tasks = [read_file_and_put_in_queue(file_path) for file_path in file_paths]
     await asyncio.gather(*tasks)
-async def file_consumer(queue, all_data_dict, translation_pairs, mode, translated_dir, json_output_dir, original_to_translated, old_translations, progress_bar):
+async def file_consumer(queue, all_data_dict, translation_pairs, mode, translated_dir, json_output_dir, original_to_translated, translation_cache, progress_bar, run_stats):
     while True:
-        original_file_path, original_content, translated_file_path, translated_content = await queue.get()
+        original_file_path, original_content, _, translated_content = await queue.get()
         try:
             progress_bar.set_description(f"Processing file: {original_file_path.name}")
             await process_json_file(
@@ -63,8 +63,9 @@ async def file_consumer(queue, all_data_dict, translation_pairs, mode, translate
                 mode=mode,
                 translated_dir=translated_dir,
                 json_output_dir=json_output_dir,
-                original_to_translated=original_to_translated,
-                old_translations=old_translations
+                glossary_text=original_to_translated,
+                translation_cache=translation_cache,
+                run_stats=run_stats
             )
             progress_bar.update(1) # Update after file is fully processed
         finally:
@@ -77,130 +78,103 @@ async def main_async():
     )
 
     # Mode selection
-    parser.add_argument(
-        '--mode',
-        choices=['translate', 'improve'],
-        required=True,
-        help='Operation mode: translate (fresh translation) or improve (improve existing translations)'
-    )
+    parser.add_argument('--mode', choices=VALID_MODES, required=True, help='Operation mode')
 
     # Directory configuration
-    parser.add_argument(
-        '--input-dir',
-        default=INPUT_DIR,
-        help='Input directory containing JSON files'
-    )
+    parser.add_argument('--input-dir', default=INPUT_DIR, help='Input directory')
+    parser.add_argument('--output-dir', default=OUTPUT_DIR, help='Base output directory')
+    parser.add_argument('--raw-dir', help='Directory with raw translations for "improve" mode')
+    parser.add_argument('--json-output-dir', help='Directory for translated JSONs (default: output-dir/json)')
+    parser.add_argument('--details-output-dir', help='Directory for translation details (default: output-dir/details)')
+    parser.add_argument('--pairs-output-dir', help='Directory for translation pairs (default: output-dir/pairs)')
 
-    parser.add_argument(
-        '--output-dir',
-        default=OUTPUT_DIR,
-        help='Base output directory for all files'
-    )
-
-    parser.add_argument(
-        '--translated-dir',
-        help='Directory containing existing raw translations (required for improve mode)'
-    )
-
-    parser.add_argument(
-        '--json-output-dir',
-        help='Directory for individual translated JSON files (defaults to output-dir/json)'
-    )
-
-    parser.add_argument(
-        '--details-output-dir',
-        help='Directory for translation details JSON (defaults to output-dir/details)'
-    )
-
-    parser.add_argument(
-        '--pairs-output-dir',
-        help='Directory for translation pairs text file (defaults to output-dir/pairs)'
-    )
-
-    parser.add_argument(
-        '--glossary-file',
-        help='Path to a specific glossary file (.json or .txt) to use (optional)'
-    )
+    # Glossary and Cache configuration
+    parser.add_argument('--glossary-file', help='Path to a specific glossary file (optional)')
+    parser.add_argument('--old-dir', help='Directory with old translations for caching (optional)')
+    parser.add_argument('--old-file', help='A single file with old translations for caching (optional)')
 
     args = parser.parse_args()
 
-    # Validate arguments and directories
-    if args.mode == 'improve' and not args.translated_dir:
-        parser.error("--translated-dir is required when using --mode=improve")
-    # Allow translated_dir in translate mode for checking old translations
-    if args.mode == 'translate' and args.translated_dir:
-        async_tqdm.write(f"Using existing translations directory for lookup: {args.translated_dir}")
+    # --- Argument Validation ---
+    if args.mode == 'improve' and not args.raw_dir:
+        parser.error("--raw-dir is required for --mode=improve")
+    if args.old_dir and args.old_file:
+        parser.error("Provide either --old-dir or --old-file for caching, not both.")
 
     json_dir = Path(args.input_dir)
-    if not json_dir.exists():
-        parser.error(f"Input directory does not exist: {json_dir}")
-    if not any(json_dir.glob("*.json")):
-        parser.error(f"No JSON files found in input directory: {json_dir}")
+    if not json_dir.is_dir() or not any(json_dir.glob("*.json")):
+        parser.error(f"Input directory not found or contains no JSON files: {json_dir}")
 
-    translated_dir = None
-    if args.translated_dir:
-        translated_dir = Path(args.translated_dir)
-        if not translated_dir.exists():
-            parser.error(f"Translated directory does not exist: {translated_dir}")
+    raw_dir = Path(args.raw_dir) if args.raw_dir else None
+    if raw_dir and not raw_dir.is_dir():
+        parser.error(f"Raw translations directory not found: {raw_dir}")
 
-    # Setup output directories
+    # --- Setup Output Directories ---
     base_output_dir = Path(args.output_dir)
-    base_output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Setup specific output directories with defaults
-    json_output_dir = Path(args.json_output_dir) if args.json_output_dir else base_output_dir / "json"
-    details_output_dir = Path(args.details_output_dir) if args.details_output_dir else base_output_dir / "details"
-    pairs_output_dir = Path(args.pairs_output_dir) if args.pairs_output_dir else base_output_dir / "pairs"
-
-    # Create all output directories
+    json_output_dir = Path(args.json_output_dir or base_output_dir / "json")
+    details_output_dir = Path(args.details_output_dir or base_output_dir / "details")
+    pairs_output_dir = Path(args.pairs_output_dir or base_output_dir / "pairs")
     for dir_path in [json_output_dir, details_output_dir, pairs_output_dir]:
         dir_path.mkdir(parents=True, exist_ok=True)
 
-    all_data_dict = []
-
-    async_tqdm.write(f"Starting translation in {args.mode} mode")
-    async_tqdm.write(f"Input directory: {json_dir}")
-    async_tqdm.write(f"JSON output directory: {json_output_dir}")
-    async_tqdm.write(f"Details output directory: {details_output_dir}")
-    async_tqdm.write(f"Pairs output directory: {pairs_output_dir}")
-    if translated_dir:
-        async_tqdm.write(f"Existing translations directory: {translated_dir}")
+    # --- Logging ---
+    logger.info(f"Starting translation in '{args.mode}' mode.")
+    logger.info(f"Input directory: {json_dir}")
+    logger.info(f"Output directories: {base_output_dir}/(json, details, pairs)")
+    if raw_dir:
+        logger.info(f"Improve mode raw translations directory: {raw_dir}")
+    if args.glossary_file:
+        logger.info(f"Using glossary file: {args.glossary_file}")
+    if args.old_dir:
+        logger.info(f"Using old translations cache directory: {args.old_dir}")
+    if args.old_file:
+        logger.info(f"Using old translations cache file: {args.old_file}")
 
     run_start = time.time()
 
-    # Dictionary to store all unique translation pairs for txt output
+    # --- Asynchronous Data Loading ---
+    tasks = {
+        "glossary": load_glossary_async(args.glossary_file),
+        "translation_cache": None
+    }
+    if args.old_dir:
+        tasks["translation_cache"] = load_old_translations_async(args.input_dir, args.old_dir)
+    elif args.old_file:
+        # Assuming old-file has a glossary-like format
+        tasks["translation_cache"] = load_glossary_async(args.old_file)
+
+    results = await asyncio.gather(*[task for task in tasks.values() if task])
+
+    # Process results
+    _, glossary_text = results[0]
+    translation_cache = {}
+    if len(results) > 1:
+        if args.old_file:
+            _, translation_cache = results[1] # From load_glossary_async
+        else:
+            translation_cache = results[1] # From load_old_translations_async
+
+    if glossary_text:
+        logger.info(f"Loaded {len(glossary_text)} glossary entries.")
+    if translation_cache:
+        logger.info(f"Loaded {len(translation_cache)} old translation pairs for cache.")
+
+    # --- File Processing Pipeline ---
+    all_data_dict = []
     translation_pairs = OrderedDict()
-
-    # Load glossary once
-    _, original_to_translated = load_glossary(args.glossary_file)
-
-    # Load old translations if translated_dir is provided
-    old_translations = {}
-    if args.translated_dir:
-        logger.info(f"Loading old translations from {args.translated_dir}...")
-        old_translations = load_old_translations(args.input_dir, args.translated_dir)
-        if old_translations:
-            logger.info(f"Loaded {len(old_translations)} old translation pairs.")
-
+    run_stats = {"from_cache": 0, "from_glossary": 0, "special_chars": 0, "empty": 0}
     file_paths = list(json_dir.glob("*.json"))
     total_files = len(file_paths)
-    async_tqdm.write(f"Total files to process: {total_files}")
+    logger.info(f"Total files to process: {total_files}")
 
     queue = asyncio.Queue()
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_FILE_OPENS)
 
     with async_tqdm(total=total_files, desc="Initializing...", mininterval=0, miniters=1) as progress_bar:
-        producer_task = asyncio.create_task(file_producer(file_paths, queue, semaphore, progress_bar, args.mode, translated_dir))
+        producer_task = asyncio.create_task(file_producer(file_paths, queue, semaphore, progress_bar, args.mode, raw_dir))
         consumer_task = asyncio.create_task(file_consumer(
-            queue,
-            all_data_dict,
-            translation_pairs,
-            args.mode,
-            translated_dir,
-            json_output_dir,
-            original_to_translated,
-            old_translations,
-            progress_bar
+            queue, all_data_dict, translation_pairs, args.mode, raw_dir,
+            json_output_dir, glossary_text, translation_cache, progress_bar, run_stats
         ))
 
         await producer_task
@@ -208,30 +182,30 @@ async def main_async():
         consumer_task.cancel()
         await asyncio.gather(consumer_task, return_exceptions=True)
 
-    # Save consolidated JSON with full translation details
+    # --- Save Results ---
     details_file = details_output_dir / "translation_details.json"
     async with aiofiles.open(details_file, "w", encoding="utf-8") as f:
         await f.write(json.dumps(all_data_dict, ensure_ascii=False, indent=2))
 
-    # Save translation pairs to txt file
     pairs_file = pairs_output_dir / "translation_pairs.txt"
     async with aiofiles.open(pairs_file, "w", encoding="utf-8") as f:
         await f.write("\n".join([f"{original}={translated}" for original, translated in translation_pairs.items()]))
 
+    # --- Final Summary ---
     run_end = time.time()
-    files_processed = len(file_paths)
-    total_translations = len(all_data_dict)
-
     logger.run_summary(
-        files_processed=files_processed,
-        total_translations=total_translations,
-        total_time=run_end - run_start
+        files_processed=len(file_paths),
+        total_translations=len(all_data_dict),
+        total_time=run_end - run_start,
+        from_cache=run_stats["from_cache"],
+        from_glossary=run_stats["from_glossary"],
+        empty_lines=run_stats["empty"],
+        special_chars=run_stats["special_chars"]
     )
-
-    async_tqdm.write("Results saved to:")
-    async_tqdm.write(f"  - Individual JSON files: {json_output_dir}")
-    async_tqdm.write(f"  - Translation details: {details_file}")
-    async_tqdm.write(f"  - Translation pairs: {pairs_file}")
+    logger.info("Results saved to:")
+    logger.info(f"  - Individual JSON files: {json_output_dir}")
+    logger.info(f"  - Translation details: {details_file}")
+    logger.info(f"  - Translation pairs: {pairs_file}")
 
 def main():
     asyncio.run(main_async())
