@@ -60,41 +60,43 @@ async def prepare_prompt_data(original_file_path, original_data, translated_file
         if raw_translation:
             # Template for improving existing translation
             prompt = []
-            prompt.append("""Bạn là một chuyên gia hiệu chỉnh các bản dịch từ Tiếng Trung (Giản thể) sang Tiếng Việt.
-Đây là một phần của câu chuyện trong tựa game Legend of Mortal có bối cảnh kiếm hiệp cổ trang Trung Quốc.
+            prompt.append("""Bạn là một chuyên gia dịch thuật từ Tiếng Trung (Giản thể) sang Tiếng Việt và đã có kinh nghiệm dịch game.
+Đây là một phần của câu chuyện trong tựa game Legend of Mortal có bối cảnh kiếm hiệp cổ trang Trung Quốc mà cần bạn dịch
 Nhiệm vụ của bạn là:
-1. Cải thiện bản dịch hiện có dựa trên văn bản gốc.
+1. Dịch văn bản trên từ Tiếng Trung (Giản thể) sang Tiếng Việt.
+2. Đảm bảo câu văn tự nhiên, mượt mà, đúng ngữ pháp và phù hợp với nội dung của game Legend of Mortal.
+3. Tự động phát hiện và viết hoa đúng các danh từ riêng (tên người, địa danh, tổ chức, v.v.).
+4. Giữ nguyên ý nghĩa ban đầu của văn bản gốc.
+5. Sử dụng phong cách kiếm hiệp cổ trang Trung Quốc.
+6. Giữ nguyên các kí hiệu đánh dấu đặc biệt như [|], [||], ???, ???, {{title}}, [{{0}}], ... và các ký hiệu khác.
+7. Đối với cụm từ ngắn (1-2 chữ), cần xem xét bối cảnh game và ưu tiên dịch theo nghĩa hành động/trạng thái thay vì nghĩa sự vật (ví dụ: "整装" nên dịch là "chuẩn bị" thay vì "toàn bộ vũ khí").
+8. Chỉ trả về phần văn bản đã được dịch.
+9. Sử dụng bản dịch thô để THAM KHẢO về xưng hô cũng như mối quan hệ giữa các nhân vật.
+10. Đảm bảo bản dịch không còn chứa văn bản tiếng Trung nào.""")
+            if glossary_matches:
+                prompt.append("\nMột số thuật ngữ/cụm từ cần giữ nguyên:")
+                for orig, trans in glossary_matches:
+                    prompt.append(f"\n- {orig}={trans}")
+            prompt.append(f"\nVăn bản cần được dịch: \n{text}")
+            prompt.append(f"\nBản dịch thô để tham khảo: \n{raw_translation}")
+
+        else:
+            # Template for fresh translation
+            prompt = []
+            prompt.append("""Bạn là một chuyên gia dịch thuật từ Tiếng Trung (Giản thể) sang Tiếng Việt và đã có kinh nghiệm dịch game.
+Đây là một phần của câu chuyện trong tựa game Legend of Mortal có bối cảnh kiếm hiệp cổ trang Trung Quốc mà cần bạn dịch
+Nhiệm vụ của bạn là:
+1. Dịch văn bản trên từ Tiếng Trung (Giản thể) sang Tiếng Việt.
 2. Đảm bảo câu văn tự nhiên, mượt mà, đúng ngữ pháp và phù hợp với nội dung của game Legend of Mortal.
 3. Tự động phát hiện và viết hoa đúng các danh từ riêng (tên người, địa danh, tổ chức, v.v.).
 4. Giữ nguyên ý nghĩa ban đầu. Không thêm giải thích.
 5. Sử dụng phong cách kiếm hiệp cổ trang Trung Quốc.
 6. Giữ nguyên các kí hiệu đánh dấu đặc biệt như [|], [||], ???, ???, {{title}}, [{{0}}], ... và các ký hiệu khác.
 7. Đối với cụm từ ngắn (1-2 chữ), cần xem xét bối cảnh game và ưu tiên dịch theo nghĩa hành động/trạng thái thay vì nghĩa sự vật (ví dụ: "整装" nên dịch là "chuẩn bị" thay vì "toàn bộ vũ khí").
-8. Chỉ trả về phần văn bản đã được cải thiện.""")
+8. Chỉ trả về phần văn bản đã được dịch.
+9. Đảm bảo bản dịch không còn chứa văn bản tiếng Trung nào.""")
             if glossary_matches:
-                prompt.append("\nThuật ngữ cần giữ nguyên hoặc dịch đặc biệt:")
-                for orig, trans in glossary_matches:
-                    prompt.append(f"\n- {orig}={trans}")
-            prompt.append(f"\nVăn bản gốc: {text}")
-            prompt.append(f"\nBản dịch hiện tại: {raw_translation}")
-
-        else:
-            # Template for fresh translation
-            prompt = []
-            prompt.append("""Bạn là một chuyên gia dịch thuật từ Tiếng Trung (Giản thể) sang Tiếng Việt.
-Đây là một phần của câu chuyện trong tựa game Legend of Mortal có bối cảnh kiếm hiệp cổ trang Trung Quốc.
-Nhiệm vụ của bạn là:
-1. Dịch từ Tiếng Trung (Giản thể) sang Tiếng Việt.
-2. Đảm bảo câu văn tự nhiên, mượt mà, đúng ngữ pháp và phù hợp với nội dung của game Legend of Mortal.
-3. Tự động phát hiện và viết hoa đúng các danh từ riêng (tên người, địa danh, tổ chức, v.v.)....
-4. Giữ nguyên ý nghĩa ban đầu của câu văn. Không cần phải giải thích thêm ý nghĩa của câu văn.
-5. Sử dụng phong cách kiếm hiệp cổ trang Trung Quốc.
-6. Giữ nguyên các kí hiệu đánh dấu đặc biệt như [|], [||], ???, ???, {{title}}, [{{0}}], v.v....
-7. Trong trường hợp văn bản gốc chỉ có dấu đặc biệt hoặc rỗng, trả về y hệt và không giải thích hay yêu cầu gì thêm.
-8. Đối với cụm từ ngắn (1-2 chữ), cần xem xét bối cảnh game và ưu tiên dịch theo nghĩa hành động/trạng thái thay vì nghĩa sự vật (ví dụ: "整装" nên dịch là "chuẩn bị" thay vì "toàn bộ vũ khí").
-9. Chỉ trả về phần văn bản đã được dịch.""")
-            if glossary_matches:
-                prompt.append("\nThuật ngữ cần giữ nguyên hoặc dịch đặc biệt:")
+                prompt.append("\nMột số thuật ngữ/cụm từ cần giữ nguyên:")
                 for orig, trans in glossary_matches:
                     prompt.append(f"\n- {orig}={trans}")
             prompt.append(f"\nVăn bản cần dịch: {text}")
