@@ -67,8 +67,8 @@ Nhiệm vụ của bạn là:
 2. Đảm bảo câu văn tự nhiên, mượt mà, đúng ngữ pháp và phù hợp với nội dung của game Legend of Mortal.
 3. Tự động phát hiện và viết hoa đúng các danh từ riêng (tên người, địa danh, tổ chức, v.v.).
 4. Giữ nguyên ý nghĩa ban đầu của văn bản gốc.
-5. Sử dụng phong cách kiếm hiệp cổ trang Trung Quốc.
-6. Giữ nguyên các kí hiệu đánh dấu đặc biệt như [|], [||], ???, ???, {{title}}, [{{0}}], ... và các ký hiệu khác.
+5. Sử dụng ngôn từ phong cách kiếm hiệp cổ trang Trung Quốc.
+6. Giữ nguyên các kí hiệu đánh dấu đặc biệt như [|], [||], ???, ???, {{title}}, [{{0}}], [{0}], ... và các ký hiệu khác. Đây là các ký hiệu cho code trong game Legend of Mortal.
 7. Đối với cụm từ ngắn (1-2 chữ), cần xem xét bối cảnh game và ưu tiên dịch theo nghĩa hành động/trạng thái thay vì nghĩa sự vật (ví dụ: "整装" nên dịch là "chuẩn bị" thay vì "toàn bộ vũ khí").
 8. Chỉ trả về phần văn bản đã được dịch.
 9. Sử dụng bản dịch thô để THAM KHẢO về xưng hô cũng như mối quan hệ giữa các nhân vật.
@@ -90,8 +90,8 @@ Nhiệm vụ của bạn là:
 2. Đảm bảo câu văn tự nhiên, mượt mà, đúng ngữ pháp và phù hợp với nội dung của game Legend of Mortal.
 3. Tự động phát hiện và viết hoa đúng các danh từ riêng (tên người, địa danh, tổ chức, v.v.).
 4. Giữ nguyên ý nghĩa ban đầu. Không thêm giải thích.
-5. Sử dụng phong cách kiếm hiệp cổ trang Trung Quốc.
-6. Giữ nguyên các kí hiệu đánh dấu đặc biệt như [|], [||], ???, ???, {{title}}, [{{0}}], ... và các ký hiệu khác.
+5. Sử dụng ngôn từ phong cách kiếm hiệp cổ trang Trung Quốc.
+6. Giữ nguyên các kí hiệu đánh dấu đặc biệt như [|], [||], ???, ???, {{title}}, [{{0}}], [{0}], ... và các ký hiệu khác. Đây là các ký hiệu cho code trong game Legend of Mortal.
 7. Đối với cụm từ ngắn (1-2 chữ), cần xem xét bối cảnh game và ưu tiên dịch theo nghĩa hành động/trạng thái thay vì nghĩa sự vật (ví dụ: "整装" nên dịch là "chuẩn bị" thay vì "toàn bộ vũ khí").
 8. Chỉ trả về phần văn bản đã được dịch.
 9. Đảm bảo bản dịch không còn chứa văn bản tiếng Trung nào.""")

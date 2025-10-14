@@ -5,7 +5,7 @@ a = Analysis(
     ['/home/rio/Documents/SomeCode/src/main.py'],
     pathex=[],
     binaries=[],
-    datas=[('/home/rio/Documents/SomeCode/.env', '.'), ('/home/rio/Documents/SomeCode/Resource', 'Resource')],
+    datas=[('/home/rio/Documents/SomeCode/.env', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
