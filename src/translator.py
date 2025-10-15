@@ -9,6 +9,7 @@ from src.config import (
     FALLBACK_LLM_MODELS,
     RATE_LIMIT_IF_QUOTA_EXCEEDED,
     RATE_LIMIT_DELAY,
+    MAX_GLOBAL_RETRIES,
 )
 from src.logger import logger
 
@@ -88,7 +89,6 @@ Văn bản cần được dịch:
     logger.debug(f"Using prompt:\n{prompt}")
 
     all_available_models = [PRIMARY_LLM_MODEL] + FALLBACK_LLM_MODELS
-    MAX_GLOBAL_RETRIES = 1  # One additional full cycle retry
     global_retry_count = 0
 
     while global_retry_count <= MAX_GLOBAL_RETRIES:
@@ -145,6 +145,7 @@ Văn bản cần được dịch:
                         logger.info(
                             f"Retrying with next API key for Model {current_model_name} (Attempt {api_retries + 1}/{max_api_retries})"
                         )
+                        await asyncio.sleep(RATE_LIMIT_DELAY / 2)
                     else:
                         logger.warning(
                             f"All API keys exhausted for Model {current_model_name}. Switching to next fallback model."
@@ -153,8 +154,7 @@ Văn bản cần được dịch:
                         # Reset API key cycle for the new model to start fresh
                         with api_key_lock:
                             pass  # Removed api_key_cycle reset here
-                    await asyncio.sleep(RATE_LIMIT_DELAY / 2)
-                    break  # Break from API key retry loop to try next model
+                        break  # Break from API key retry loop to try next model
 
         # If we reach here, all models and API keys have been exhausted for the current global retry cycle
         if global_retry_count < MAX_GLOBAL_RETRIES:

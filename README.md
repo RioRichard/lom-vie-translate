@@ -45,9 +45,10 @@ FALLBACK_LLM_MODELS=
 
 # Rate Limiting and Concurrency
 RATE_LIMIT_DELAY=2
-RATE_LIMIT_IF_QUOTA_EXCEEDED=60
+RATE_LIMIT_IF_QUOTA_EXCEEDED=30
 MAX_CONCURRENT=5
 MAX_CONCURRENT_FILE_OPENS=999
+MAX_GLOBAL_RETRIES=3
 
 # Directory Configuration (paths are relative to project root)
 INPUT_DIR=Resource/LeanLocalJson
@@ -255,4 +256,4 @@ Simple text file with original=translation pairs:
 - Concurrent processing is used to optimize performance
 - Logging system provides detailed progress and error tracking
 - **Consistent Logging:** All logging now uses the `src/logger.py` instance for better consistency and file output.
-- **Robust API Handling:** The `src/translator.py` now includes robust API key rotation and fallback model mechanisms to enhance reliability and handle rate limits or quota issues more gracefully.
+- **Robust API Handling:** The `src/translator.py` now includes robust API key rotation, fallback model mechanisms, and global retry logic (`MAX_GLOBAL_RETRIES`) to enhance reliability and handle rate limits or quota issues more gracefully. The `RATE_LIMIT_IF_QUOTA_EXCEEDED` has been adjusted to `30` seconds.
