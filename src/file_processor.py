@@ -6,12 +6,20 @@ import asyncio
 from tqdm.asyncio import tqdm as async_tqdm
 from src.translator import translate_text
 from src.prompt_preparer import prepare_prompt_data
-from src.config import MAX_CONCURRENT, OUTPUT_DIR
+from src.config import MAX_CONCURRENT, OUTPUT_DIR, RATE_LIMIT_DELAY
 from src.utils import SPECIAL_CHARS
 from src.logger import logger
 
 
-async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=None, glossary_text=None, translation_cache=None, run_stats=None):
+async def process_entry(
+    entry,
+    thread_idx=None,
+    mode="translate",
+    prompt_data=None,
+    glossary_text=None,
+    translation_cache=None,
+    run_stats=None,
+):
     """Process a single entry for translation or improvement
 
     Args:
@@ -27,12 +35,12 @@ async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=No
         dict: The processed entry with translated text
     """
     # Ensure we have the required fields
-    if 'Name' not in entry or 'Text' not in entry:
+    if "Name" not in entry or "Text" not in entry:
         logger.warning(f"Entry missing required fields: {entry}")
         return entry
 
-    name = entry['Name']
-    original_text = entry['Text'].strip()
+    name = entry["Name"]
+    original_text = entry["Text"].strip()
 
     # Skip empty text
     if not original_text:
@@ -46,34 +54,29 @@ async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=No
         logger.debug(f"Skipping special character: {original_text}")
         if run_stats:
             run_stats["special_chars"] += 1
-        return {
-            'Name': name,
-            'Text': original_text
-        }
+        return {"Name": name, "Text": original_text}
 
     # 1. Check for old translation (cache) first for performance
     if translation_cache:
         cached_translation = translation_cache.get(original_text)
         if cached_translation:
-            logger.info(f"Reusing old translation for original text: '{original_text}' -> '{cached_translation}'")
+            logger.info(
+                f"Reusing old translation for original text: '{original_text}' -> '{cached_translation}'"
+            )
             if run_stats:
                 run_stats["from_cache"] += 1
-            return {
-                'Name': name,
-                'Text': cached_translation
-            }
+            return {"Name": name, "Text": cached_translation}
 
     # 2. Check for existing translation in glossary (can also act as a cache)
     if glossary_text:
         existing_translation = glossary_text.get(original_text)
         if existing_translation:
-            logger.info(f"Reusing glossary for original text: '{original_text}' -> '{existing_translation}'")
+            logger.info(
+                f"Reusing glossary for original text: '{original_text}' -> '{existing_translation}'"
+            )
             if run_stats:
                 run_stats["from_glossary"] += 1
-            return {
-                'Name': name,
-                'Text': existing_translation
-            }
+            return {"Name": name, "Text": existing_translation}
 
     # Start translation
     line_start = time.time()
@@ -83,14 +86,14 @@ async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=No
         thread_idx=thread_idx,
         name=name,
         prompt_data=prompt_data,
-        original_to_translated=glossary_text
+        original_to_translated=glossary_text,
     )
 
-    # await asyncio.sleep(RATE_LIMIT_DELAY)
+    await asyncio.sleep(RATE_LIMIT_DELAY)
     line_end = time.time()
 
     # Log the translation with raw translation if available in improve mode
-    raw_translation = prompt_data.get('raw_translation') if prompt_data else None
+    raw_translation = prompt_data.get("raw_translation") if prompt_data else None
 
     logger.translation_detail(
         name=name,
@@ -98,16 +101,26 @@ async def process_entry(entry, thread_idx=None, mode='translate', prompt_data=No
         translated=translated_text,
         duration=line_end - line_start,
         raw_translation=raw_translation,
-        mode=mode
+        mode=mode,
     )
 
     # Return entry with same structure but translated text
-    return {
-        'Name': name,
-        'Text': translated_text
-    }
+    return {"Name": name, "Text": translated_text}
 
-async def process_json_file(file_path, file_content, translated_file_content, all_data_dict, translation_pairs, mode='translate', translated_dir=None, json_output_dir=None, glossary_text=None, translation_cache=None, run_stats=None):
+
+async def process_json_file(
+    file_path,
+    file_content,
+    translated_file_content,
+    all_data_dict,
+    translation_pairs,
+    mode="translate",
+    translated_dir=None,
+    json_output_dir=None,
+    glossary_text=None,
+    translation_cache=None,
+    run_stats=None,
+):
     """Process a JSON file for translation or improvement
 
     Args:
@@ -127,8 +140,7 @@ async def process_json_file(file_path, file_content, translated_file_content, al
         ValueError: If mode is invalid or if translated_dir is missing in improve mode
     """
 
-
-    if mode == 'improve' and not translated_dir:
+    if mode == "improve" and not translated_dir:
         raise ValueError("translated_dir is required when using improve mode")
 
     file_name = file_path.name
@@ -139,14 +151,16 @@ async def process_json_file(file_path, file_content, translated_file_content, al
     try:
         file_start = time.time()
 
-        data = json.loads(file_content) # Parse JSON once
+        data = json.loads(file_content)  # Parse JSON once
 
         # Prepare prompts with appropriate templates and context
         prompt_data_list, old_translated_file_data = await prepare_prompt_data(
             original_file_path=file_path,
             original_data=data,
-            translated_file_content=translated_file_content if mode == 'improve' else None,
-            original_to_translated=glossary_text
+            translated_file_content=translated_file_content
+            if mode == "improve"
+            else None,
+            original_to_translated=glossary_text,
         )
         entries_list, is_array_format = _parse_json_entries(data)
         # Process all entries concurrently
@@ -154,7 +168,12 @@ async def process_json_file(file_path, file_content, translated_file_content, al
 
         tasks = _create_translation_tasks(entries_list, prompt_data_list)
         semaphore = asyncio.Semaphore(MAX_CONCURRENT)
-        pbar = async_tqdm(total=len(tasks), desc=f"Entries in {file_name}", leave=False, mininterval=0.1)
+        pbar = async_tqdm(
+            total=len(tasks),
+            desc=f"Entries in {file_name}",
+            leave=False,
+            mininterval=0.1,
+        )
 
         async def safe_process_entry_with_delay(args):
             entry, idx, prompt = args
@@ -166,20 +185,22 @@ async def process_json_file(file_path, file_content, translated_file_content, al
                     prompt_data=prompt,
                     glossary_text=glossary_text,
                     translation_cache=translation_cache,
-                    run_stats=run_stats
+                    run_stats=run_stats,
                 )
                 pbar.update(1)
                 return result
 
         # Process all entries concurrently with tqdm progress bar
-        translations = await asyncio.gather(*[safe_process_entry_with_delay(task) for task in tasks])
+        translations = await asyncio.gather(
+            *[safe_process_entry_with_delay(task) for task in tasks]
+        )
         pbar.close()
 
         if is_array_format:
-            data['entries']['Array'] = translations
+            data["entries"]["Array"] = translations
         else:
-            data['entries'] = translations
-        async with aiofiles.open(output_path, 'w', encoding='utf-8') as f:
+            data["entries"] = translations
+        async with aiofiles.open(output_path, "w", encoding="utf-8") as f:
             await f.write(json.dumps(data, ensure_ascii=False, indent=2))
 
         await _process_and_store_results(
@@ -189,43 +210,63 @@ async def process_json_file(file_path, file_content, translated_file_content, al
             all_data_dict=all_data_dict,
             translation_pairs=translation_pairs,
             mode=mode,
-            translated_file_content=translated_file_content
+            translated_file_content=translated_file_content,
         )
 
         file_end = time.time()
-        logger.info(f"Completed {file_name} - {len(translations)} translations in {file_end - file_start:.2f}s")
+        logger.info(
+            f"Completed {file_name} - {len(translations)} translations in {file_end - file_start:.2f}s"
+        )
     except Exception as e:
         logger.error(f"Error processing {file_name}: {str(e)}")
 
+
 def _parse_json_entries(data):
-    entries = data.get('entries', [])
-    if isinstance(entries, dict) and 'Array' in entries:
-        entries_list = entries['Array']
+    entries = data.get("entries", [])
+    if isinstance(entries, dict) and "Array" in entries:
+        entries_list = entries["Array"]
         is_array_format = True
     else:
         entries_list = entries
         is_array_format = False
     return entries_list, is_array_format
 
+
 def _create_translation_tasks(entries_list, prompt_data_list):
     if len(prompt_data_list) != len(entries_list):
-        logger.warning(f"Number of prompts ({len(prompt_data_list)}) doesn't match number of entries ({len(entries_list)})")
+        logger.warning(
+            f"Number of prompts ({len(prompt_data_list)}) doesn't match number of entries ({len(entries_list)})"
+        )
         logger.debug(f"Entries list: {entries_list}")
         logger.debug(f"Prompt data list: {prompt_data_list}")
 
     tasks = []
     for idx, entry in enumerate(entries_list):
-        prompt = prompt_data_list[idx] if idx < len(prompt_data_list) else {
-            'name': entry.get('key', '') or entry.get('Name', ''),
-            'original_text': entry.get('value', '') or entry.get('Text', '').strip(),
-            'glossary_matches': [],
-            'raw_translation': None,
-            'prompt': None  # Will use default prompt in translator
-        }
+        prompt = (
+            prompt_data_list[idx]
+            if idx < len(prompt_data_list)
+            else {
+                "name": entry.get("key", "") or entry.get("Name", ""),
+                "original_text": entry.get("value", "")
+                or entry.get("Text", "").strip(),
+                "glossary_matches": [],
+                "raw_translation": None,
+                "prompt": None,  # Will use default prompt in translator
+            }
+        )
         tasks.append((entry, idx, prompt))
     return tasks
 
-async def _process_and_store_results(file_name, translations, original_entries, all_data_dict, translation_pairs, mode, translated_file_content):
+
+async def _process_and_store_results(
+    file_name,
+    translations,
+    original_entries,
+    all_data_dict,
+    translation_pairs,
+    mode,
+    translated_file_content,
+):
     raw_translation_data = None
     if translated_file_content:
         try:
@@ -234,26 +275,28 @@ async def _process_and_store_results(file_name, translations, original_entries, 
             logger.error(f"Could not parse raw translated file content for {file_name}")
 
     for entry, original_entry in zip(translations, original_entries):
-        name = entry.get('Name')
-        original_text = original_entry.get('Text', '').strip()
-        final_text = entry.get('Text', '').strip()
+        name = entry.get("Name")
+        original_text = original_entry.get("Text", "").strip()
+        final_text = entry.get("Text", "").strip()
 
         if name and original_text and final_text:
             entry_details = {
-                'Name': name,
-                'Original': original_text,
-                'Translated': final_text
+                "Name": name,
+                "Original": original_text,
+                "Translated": final_text,
             }
 
-            if mode == 'improve' and raw_translation_data:
-                for trans_entry in raw_translation_data.get('entries', {}).get('Array', []):
-                    if trans_entry.get('Name') == name:
-                        entry_details['Raw'] = trans_entry.get('Text', '').strip()
+            if mode == "improve" and raw_translation_data:
+                for trans_entry in raw_translation_data.get("entries", {}).get(
+                    "Array", []
+                ):
+                    if trans_entry.get("Name") == name:
+                        entry_details["Raw"] = trans_entry.get("Text", "").strip()
                         break
 
             all_data_dict.append(entry_details)
 
-            escaped_original = original_text.replace('\r', '\\r').replace('\n', '\\n')
-            escaped_final = final_text.replace('\r', '\\r').replace('\n', '\\n')
+            escaped_original = original_text.replace("\r", "\\r").replace("\n", "\\n")
+            escaped_final = final_text.replace("\r", "\\r").replace("\n", "\\n")
             if escaped_original not in translation_pairs:
                 translation_pairs[escaped_original] = escaped_final

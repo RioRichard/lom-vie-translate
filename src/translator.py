@@ -79,9 +79,11 @@ Nhiệm vụ của bạn là:
 Ví dụ:
     {title} -> {title}
     捅人伤害+{0:N0}  骰子+{1:N0} -> Đâm người gây thương tích +{0:N0}  Xúc xắc +{1:N0}
+    南宫伯伯，南宫爷爷，萤儿给您们请安。\\r\\n恭贺爷爷百岁大寿，祝您老人家福如东海，寿比南山。-> Nam Cung bá bá, Nam Cung gia gia, Huỳnh Nhi bái kiến hai vị.\\r\\nChúc gia gia thượng thọ trăm tuổi, nguyện lão nhân gia phúc như Đông Hải, thọ tùng Nam Sơn.
 4. Đối với cụm từ ngắn (1-2 chữ), cần xem xét bối cảnh game và ưu tiên dịch theo nghĩa hành động/trạng thái thay vì nghĩa sự vật.
-Ví dụ: "整装" nên dịch là "chuẩn bị" thay vì "toàn bộ vũ khí"
-5. Chỉ trả về phần văn bản đã được dịch.
+Ví dụ: 
+    "整装" nên dịch là "chuẩn bị" thay vì "toàn bộ vũ khí"
+5. Chỉ trả về phần văn bản đã được dịch ở dạng plain text.
 6. Đảm bảo bản dịch không còn chứa văn bản tiếng Trung nào.
 Văn bản cần được dịch:
 """
@@ -104,7 +106,6 @@ Văn bản cần được dịch:
                     logger.api_call(api_index, api_key, current_model_name)
                     logger.translation_start(name, text, current_model_name)
                     line_start = time.time()
-                    await asyncio.sleep(RATE_LIMIT_DELAY)
                     response = await asyncio.to_thread(
                         model_instance.generate_content, prompt
                     )
@@ -161,8 +162,8 @@ Văn bản cần được dịch:
             logger.info(
                 f"All models and API keys exhausted. Initiating global retry {global_retry_count + 1}/{MAX_GLOBAL_RETRIES + 1} after delay."
             )
-            await asyncio.sleep(RATE_LIMIT_IF_QUOTA_EXCEEDED)
             global_retry_count += 1
+            await asyncio.sleep(RATE_LIMIT_IF_QUOTA_EXCEEDED)
             # Reset API key cycle for the new global retry to start fresh
             with api_key_lock:
                 api_key_cycle = itertools.cycle(API_KEYS)
