@@ -18,12 +18,14 @@ This project is a specialized tool for translating game text from Chinese (Simpl
     API_KEYS=your-api-key-1,your-api-key-2,your-api-key-3
 
     # Model Settings
-    GOOGLE_STUDIO_AI_LLM=gemma-3-27b-it
+    PRIMARY_LLM_MODEL=gemma-3-27b-it
+    FALLBACK_LLM_MODELS=
 
     # Rate Limiting and Concurrency
     RATE_LIMIT_DELAY=2
     RATE_LIMIT_IF_QUOTA_EXCEEDED=60
     MAX_CONCURRENT=5
+    MAX_CONCURRENT_FILE_OPENS=999
 
     # Directory Configuration (paths are relative to project root)
     INPUT_DIR=Resource/LeanLocalJson
@@ -51,7 +53,9 @@ python src/main.py \
     --json-output-dir /path/to/json_output (optional, defaults to --output-dir/json) \
     --details-output-dir /path/to/details_output (optional, defaults to --output-dir/details) \
     --pairs-output-dir /path/to/pairs_output (optional, defaults to --output-dir/pairs) \
-    --glossary-file /path/to/your_glossary.json (optional)
+    --glossary-file /path/to/your_glossary.json (optional) \
+    --old-dir /path/to/old_translations (optional, for caching old translations) \
+    --old-file /path/to/single_old_translation_file.json (optional, for caching old translations from a single file)
 ```
 
 ### Improvement Mode
@@ -62,12 +66,14 @@ Refines existing translations.
 python src/main.py \
     --mode improve \
     --input-dir /path/to/input_jsons \
-    --translated-dir /path/to/raw_translations \
+    --raw-dir /path/to/raw_translations \
     --output-dir /path/to/base_output \
     --json-output-dir /path/to/json_output (optional, defaults to --output-dir/json) \
     --details-output-dir /path/to/details_output (optional, defaults to --output-dir/details) \
     --pairs-output-dir /path/to/pairs_output (optional, defaults to --output-dir/pairs) \
-    --glossary-file /path/to/your_glossary.json (optional)
+    --glossary-file /path/to/your_glossary.json (optional) \
+    --old-dir /path/to/old_translations (optional, for caching old translations) \
+    --old-file /path/to/single_old_translation_file.json (optional, for caching old translations from a single file)
 ```
 
 ## Tool Usage
