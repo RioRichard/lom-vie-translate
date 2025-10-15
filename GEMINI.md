@@ -146,6 +146,14 @@ Maps translation entries to their context, including glossary matches. This scri
 python tool/translation_mapper.py
 ```
 
+### 6. `improve_glossary.py`
+
+Prepares improvement prompts for entries in a glossary file.
+
+```bash
+python tool/improve_glossary.py --glossary-file /path/to/your_glossary.json --output-dir /path/to/output_prompts
+```
+
 # Development Conventions
 
 *   **Language:** Python
