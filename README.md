@@ -138,6 +138,18 @@ The glossary helps maintain consistent translations for frequently used terms.
 ### Translation Mode
 ```bash
 python src/main.py \
+    -m translate \
+    -id /path/to/input_jsons \
+    -od /path/to/base_output \
+    -jod /path/to/json_output (optional, defaults to --output-dir/json) \
+    -dod /path/to/details_output (optional, defaults to --output-dir/details) \
+    -pod /path/to/pairs_output (optional, defaults to --output-dir/pairs) \
+    -gf /path/to/your_glossary.json (optional) \
+    -old /path/to/old_translations (optional, for caching old translations) \
+    -olf /path/to/single_old_translation_file.json (optional, for caching old translations from a single file)
+
+# Or using long arguments:
+python src/main.py \
     --mode translate \
     --input-dir /path/to/input_jsons \
     --output-dir /path/to/base_output \
@@ -151,6 +163,19 @@ python src/main.py \
 
 ### Improvement Mode
 ```bash
+python src/main.py \
+    -m improve \
+    -i /path/to/input_jsons \
+    -rd /path/to/raw_translations \
+    -od /path/to/base_output \
+    -jod /path/to/json_output (optional, defaults to --output-dir/json) \
+    -dod /path/to/details_output (optional, defaults to --output-dir/details) \
+    -pod /path/to/pairs_output (optional, defaults to --output-dir/pairs) \
+    -gf /path/to/your_glossary.json (optional) \
+    -old /path/to/old_translations (optional, for caching old translations) \
+    -olf /path/to/single_old_translation_file.json (optional, for caching old translations from a single file)
+
+# Or using long arguments:
 python src/main.py \
     --mode improve \
     --input-dir /path/to/input_jsons \
