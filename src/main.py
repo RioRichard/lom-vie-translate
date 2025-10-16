@@ -255,7 +255,13 @@ async def main_async():
     # --- File Processing Pipeline ---
     all_data_dict = []
     translation_pairs = OrderedDict()
-    run_stats = {"from_cache": 0, "from_glossary": 0, "special_chars": 0, "empty": 0}
+    run_stats = {
+        "from_cache": 0,
+        "from_glossary": 0,
+        "special_chars": 0,
+        "empty": 0,
+        "from_pairs": 0,
+    }
     file_paths = list(json_dir.glob("*.json"))
     total_files = len(file_paths)
     logger.info(f"Total files to process: {total_files}")
@@ -314,6 +320,7 @@ async def main_async():
         total_translations=len(all_data_dict),
         total_time=run_end - run_start,
         from_cache=run_stats["from_cache"],
+        from_reuse_translation=run_stats["from_pairs"],
         from_glossary=run_stats["from_glossary"],
         empty_lines=run_stats["empty"],
         special_chars=run_stats["special_chars"],

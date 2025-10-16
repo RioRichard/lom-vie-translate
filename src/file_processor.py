@@ -13,8 +13,8 @@ from src.logger import logger
 
 async def process_entry(
     entry,
+    translate_pairs,
     mode="translate",
-    translate_pairs=None,
     prompt_data=None,
     glossary_text=None,
     translation_cache=None,
@@ -69,6 +69,9 @@ async def process_entry(
 
     # 2. Use translation pairs as cache translation
     if translate_pairs:
+        logger.debug(
+            f"{len(translate_pairs)}: {run_stats['from_pairs'] if run_stats and run_stats['from_pairs'] else 0}"
+        )
         if original_text in translate_pairs:
             logger.info(
                 f"Reusing existing translation for original text: '{original_text}' -> '{translate_pairs[original_text]}'"
@@ -113,6 +116,10 @@ async def process_entry(
         mode=mode,
     )
 
+    escaped_original = original_text.replace("\r", "\\r").replace("\n", "\\n")
+    escaped_final = translated_text.replace("\r", "\\r").replace("\n", "\\n")
+    if escaped_original not in translate_pairs:
+        translate_pairs[escaped_original] = escaped_final
     # Return entry with same structure but translated text
     return {"Name": name, "Text": translated_text}
 
@@ -217,7 +224,6 @@ async def process_json_file(
             translations=translations,
             original_entries=entries_list,
             all_data_dict=all_data_dict,
-            translation_pairs=translation_pairs,
             mode=mode,
             translated_file_content=translated_file_content,
         )
@@ -272,7 +278,6 @@ async def _process_and_store_results(
     translations,
     original_entries,
     all_data_dict,
-    translation_pairs,
     mode,
     translated_file_content,
 ):
@@ -304,8 +309,3 @@ async def _process_and_store_results(
                         break
 
             all_data_dict.append(entry_details)
-
-            escaped_original = original_text.replace("\r", "\\r").replace("\n", "\\n")
-            escaped_final = final_text.replace("\r", "\\r").replace("\n", "\\n")
-            if escaped_original not in translation_pairs:
-                translation_pairs[escaped_original] = escaped_final
