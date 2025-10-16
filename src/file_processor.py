@@ -13,8 +13,8 @@ from src.logger import logger
 
 async def process_entry(
     entry,
-    thread_idx=None,
     mode="translate",
+    translate_pairs=None,
     prompt_data=None,
     glossary_text=None,
     translation_cache=None,
@@ -56,18 +56,7 @@ async def process_entry(
             run_stats["special_chars"] += 1
         return {"Name": name, "Text": original_text}
 
-    # 1. Check for old translation (cache) first for performance
-    if translation_cache:
-        cached_translation = translation_cache.get(original_text)
-        if cached_translation:
-            logger.info(
-                f"Reusing old translation for original text: '{original_text}' -> '{cached_translation}'"
-            )
-            if run_stats:
-                run_stats["from_cache"] += 1
-            return {"Name": name, "Text": cached_translation}
-
-    # 2. Check for existing translation in glossary (can also act as a cache)
+    # 1. Check for existing translation in glossary (can also act as a cache)
     if glossary_text:
         existing_translation = glossary_text.get(original_text)
         if existing_translation:
@@ -78,22 +67,42 @@ async def process_entry(
                 run_stats["from_glossary"] += 1
             return {"Name": name, "Text": existing_translation}
 
+    # 2. Use translation pairs as cache translation
+    if translate_pairs:
+        if original_text in translate_pairs:
+            logger.info(
+                f"Reusing existing translation for original text: '{original_text}' -> '{translate_pairs[original_text]}'"
+            )
+            if run_stats:
+                run_stats["from_pairs"] += 1
+            return {"Name": name, "Text": translate_pairs[original_text]}
+
+    # 3. Check for old translation (cache) first for performance
+    if translation_cache:
+        cached_translation = translation_cache.get(original_text)
+        if cached_translation:
+            logger.info(
+                f"Reusing old translation for original text: '{original_text}' -> '{cached_translation}'"
+            )
+            if run_stats:
+                run_stats["from_cache"] += 1
+            return {"Name": name, "Text": cached_translation}
+
     # Start translation
     line_start = time.time()
 
     translated_text = await translate_text(
         text=original_text,
-        thread_idx=thread_idx,
         name=name,
         prompt_data=prompt_data,
         original_to_translated=glossary_text,
     )
 
     await asyncio.sleep(RATE_LIMIT_DELAY)
-    line_end = time.time()
 
     # Log the translation with raw translation if available in improve mode
     raw_translation = prompt_data.get("raw_translation") if prompt_data else None
+    line_end = time.time()
 
     logger.translation_detail(
         name=name,
@@ -176,14 +185,14 @@ async def process_json_file(
         )
 
         async def safe_process_entry_with_delay(args):
-            entry, idx, prompt = args
+            entry, prompt = args
             async with semaphore:
                 result = await process_entry(
                     entry=entry,
-                    thread_idx=idx,
                     mode=mode,
                     prompt_data=prompt,
                     glossary_text=glossary_text,
+                    translate_pairs=translation_pairs,
                     translation_cache=translation_cache,
                     run_stats=run_stats,
                 )
@@ -254,7 +263,7 @@ def _create_translation_tasks(entries_list, prompt_data_list):
                 "prompt": None,  # Will use default prompt in translator
             }
         )
-        tasks.append((entry, idx, prompt))
+        tasks.append((entry, prompt))
     return tasks
 
 
