@@ -85,7 +85,7 @@ class TranslationLogger:
         """
         action = "Translation" if mode == "translate" else "Improvement"
         message = (
-            f"{action} completed in {duration:.2f}s\n"
+            f"{action} completed in {duration:.2f}s\n )"
             f"    Name: {name}\n"
             f"    Original: {original}\n"
         )

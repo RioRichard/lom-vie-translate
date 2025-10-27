@@ -1,3 +1,4 @@
+from concurrent.futures import thread
 import json
 import time
 from pathlib import Path
@@ -7,12 +8,13 @@ from tqdm.asyncio import tqdm as async_tqdm
 from src.translator import translate_text
 from src.prompt_preparer import prepare_prompt_data
 from src.config import MAX_CONCURRENT, OUTPUT_DIR, RATE_LIMIT_DELAY
-from src.utils import SPECIAL_CHARS
+from src.utils import SPECIAL_CHARS, postprocess_text
 from src.logger import logger
 
 
 async def process_entry(
     entry,
+    thread_idx,
     translate_pairs,
     mode="translate",
     prompt_data=None,
@@ -93,6 +95,7 @@ async def process_entry(
 
     # Start translation
     line_start = time.time()
+    await asyncio.sleep((thread_idx % MAX_CONCURRENT) - 1 + RATE_LIMIT_DELAY)
 
     translated_text = await translate_text(
         text=original_text,
@@ -101,25 +104,23 @@ async def process_entry(
         original_to_translated=glossary_text,
     )
 
-    await asyncio.sleep(RATE_LIMIT_DELAY)
-
     # Log the translation with raw translation if available in improve mode
     raw_translation = prompt_data.get("raw_translation") if prompt_data else None
     line_end = time.time()
 
+    escaped_original = postprocess_text(original_text, for_json=False)
+    escaped_final = postprocess_text(translated_text, for_json=False)
+    if escaped_original not in translate_pairs:
+        translate_pairs[escaped_original] = escaped_final
+
     logger.translation_detail(
         name=name,
         original=original_text,
-        translated=translated_text,
+        translated=postprocess_text(translated_text),
         duration=line_end - line_start,
         raw_translation=raw_translation,
         mode=mode,
     )
-
-    escaped_original = original_text.replace("\r", "\\r").replace("\n", "\\n")
-    escaped_final = translated_text.replace("\r", "\\r").replace("\n", "\\n")
-    if escaped_original not in translate_pairs:
-        translate_pairs[escaped_original] = escaped_final
     # Return entry with same structure but translated text
     return {"Name": name, "Text": translated_text}
 
@@ -170,7 +171,7 @@ async def process_json_file(
         data = json.loads(file_content)  # Parse JSON once
 
         # Prepare prompts with appropriate templates and context
-        prompt_data_list, old_translated_file_data = await prepare_prompt_data(
+        prompt_data_list, _ = await prepare_prompt_data(
             original_file_path=file_path,
             original_data=data,
             translated_file_content=translated_file_content
@@ -192,11 +193,12 @@ async def process_json_file(
         )
 
         async def safe_process_entry_with_delay(args):
-            entry, prompt = args
+            entry, prompt, idx = args
             async with semaphore:
                 result = await process_entry(
                     entry=entry,
                     mode=mode,
+                    thread_idx=idx,
                     prompt_data=prompt,
                     glossary_text=glossary_text,
                     translate_pairs=translation_pairs,
@@ -261,6 +263,7 @@ def _create_translation_tasks(entries_list, prompt_data_list):
             prompt_data_list[idx]
             if idx < len(prompt_data_list)
             else {
+                "idx": idx,
                 "name": entry.get("key", "") or entry.get("Name", ""),
                 "original_text": entry.get("value", "")
                 or entry.get("Text", "").strip(),
@@ -269,7 +272,7 @@ def _create_translation_tasks(entries_list, prompt_data_list):
                 "prompt": None,  # Will use default prompt in translator
             }
         )
-        tasks.append((entry, prompt))
+        tasks.append((entry, prompt, idx))
     return tasks
 
 
@@ -297,6 +300,7 @@ async def _process_and_store_results(
             entry_details = {
                 "Name": name,
                 "Original": original_text,
+                "Raw": None,
                 "Translated": final_text,
             }
 

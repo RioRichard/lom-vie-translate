@@ -12,6 +12,7 @@ from src.config import (
     MAX_GLOBAL_RETRIES,
 )
 from src.logger import logger
+from src.utils import START_PROMPT, RULES_PROMPT, STORY_CONTEXT_PROMPT
 
 # Thread safety for API key rotation
 api_key_lock = Lock()
@@ -20,10 +21,8 @@ api_key_lock = Lock()
 api_key_cycle = itertools.cycle(API_KEYS)
 
 generation_config = {
-    "temperature": 0,
+    "temperature": 0.1,
     "max_output_tokens": 1000,
-    "top_p": 1,
-    "top_k": 1,
 }
 
 
@@ -68,29 +67,8 @@ async def translate_text(
     if prompt_data and "prompt" in prompt_data:
         prompt = prompt_data["prompt"]
     else:
+        prompt = f"{START_PROMPT}\n{STORY_CONTEXT_PROMPT}\n{RULES_PROMPT}\n"
         # Default translation prompt
-        prompt = """Bạn là một chuyên gia dịch thuật từ Tiếng Trung (Giản thể) sang Tiếng Việt và đã có kinh nghiệm dịch game.
-Đây là một phần của câu chuyện trong tựa game Legend of Mortal có bối cảnh kiếm hiệp cổ trang Trung Quốc mà cần bạn dịch
-Nhiệm vụ của bạn là:
-1. Dịch văn bản trên từ Tiếng Trung (Giản thể) sang Tiếng Việt, đảm bảo câu văn giữ ý nghĩa của văn bản gốc, đồng thời câu văn phải tự nhiên, mượt mà, phù hợp với bối cảnh Kiếm hiệp cổ trang Trung Quốc của game Legend of Mortal
-2. Tự động phát hiện và viết hoa đúng các danh từ riêng (tên người, địa danh, tổ chức, v.v.).
-3. Trong một số trường hợp, có thể ưu tiên sử dụng thành ngữ, tục ngữ phổ biến của người Việt để dịch, hoặc dịch sao đảm bảo chất thơ của câu.
-Ví dụ: (Format: Gốc / Bản dịch Thô / Bản dịch cuối)
-    預設 / Giậu đổ bìm leo / Châm dầu vào lửa.
-    天下寂寥事，与君阔别时 / Thiên hạ bao chuyện u buồn, chính khi cùng người chia ly / Nhân gian hiu quạnh, xa cách cố nhân
-4. Giữ nguyên các kí hiệu đánh dấu đặc biệt như [|], [||], ???, ???, {{title}}, [{{0}}], [{0}], ... và các ký hiệu khác. Đây là các ký hiệu cho code trong game Legend of Mortal.
-Ví dụ:
-    {title} -> {title}
-    捅人伤害+{0:N0}  骰子+{1:N0} -> Đâm người gây thương tích +{0:N0}  Xúc xắc +{1:N0}
-    南宫伯伯，南宫爷爷，萤儿给您们请安。\\r\\n恭贺爷爷百岁大寿，祝您老人家福如东海，寿比南山。-> Nam Cung bá bá, Nam Cung gia gia, Huỳnh Nhi bái kiến hai vị.\\r\\nChúc gia gia thượng thọ trăm tuổi, nguyện lão nhân gia phúc như Đông Hải, thọ tùng Nam Sơn.
-5. Đối với cụm từ ngắn (1-2 chữ), cần xem xét bối cảnh game và ưu tiên dịch theo nghĩa hành động/trạng thái thay vì nghĩa sự vật.
-Ví dụ:
-    "整装" nên dịch là "chuẩn bị" thay vì "toàn bộ vũ khí"
-6. Chỉ trả về phần văn bản đã được dịch dươi định dạng plain text.
-7. Sử dụng bản dịch thô để THAM KHẢO về xưng hô cũng như mối quan hệ giữa các nhân vật.
-8. Đảm bảo bản dịch không còn chứa văn bản tiếng Trung nào.
-Văn bản cần được dịch:
-"""
         prompt += f"""\n{text}"""
     logger.debug(f"Using prompt:\n{prompt}")
 
@@ -150,7 +128,7 @@ Văn bản cần được dịch:
                         logger.info(
                             f"Retrying with next API key for Model {current_model_name} (Attempt {api_retries + 1}/{max_api_retries})"
                         )
-                        await asyncio.sleep(RATE_LIMIT_DELAY / 2)
+                        await asyncio.sleep(api_retries + RATE_LIMIT_DELAY)
                     else:
                         logger.warning(
                             f"All API keys exhausted for Model {current_model_name}. Switching to next fallback model."
