@@ -95,7 +95,9 @@ async def process_entry(
 
     # Start translation
     line_start = time.time()
-    await asyncio.sleep((thread_idx % MAX_CONCURRENT) - 1 + RATE_LIMIT_DELAY)
+
+    if thread_idx != 1:
+        await asyncio.sleep((thread_idx % MAX_CONCURRENT) - 1 + RATE_LIMIT_DELAY)
 
     translated_text = await translate_text(
         text=original_text,

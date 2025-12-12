@@ -101,5 +101,6 @@ async def prepare_prompt_data(
             }
         )
 
+
     logger.debug(f"Generated prompt data list: {prompt_data}")
     return prompt_data, translated_file_entries

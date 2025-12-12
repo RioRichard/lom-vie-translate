@@ -22,7 +22,7 @@ api_key_cycle = itertools.cycle(API_KEYS)
 
 generation_config = {
     "temperature": 0.1,
-    "max_output_tokens": 1000,
+    "max_output_tokens": 1500,
 }
 
 
@@ -128,7 +128,7 @@ async def translate_text(
                         logger.info(
                             f"Retrying with next API key for Model {current_model_name} (Attempt {api_retries + 1}/{max_api_retries})"
                         )
-                        await asyncio.sleep(api_retries + RATE_LIMIT_DELAY)
+                        await asyncio.sleep(RATE_LIMIT_DELAY)
                     else:
                         logger.warning(
                             f"All API keys exhausted for Model {current_model_name}. Switching to next fallback model."

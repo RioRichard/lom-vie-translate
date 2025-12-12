@@ -167,9 +167,12 @@ async def main_async():
         try:
             config_parser = configparser.ConfigParser()
             config_parser.read(config_path)
+            # Load defaults first
+            for key, value in config_parser.defaults().items():
+                config_values[key.replace("-", "_")] = value
+            # Then load other sections (if any)
             for section in config_parser.sections():
                 for key, value in config_parser.items(section):
-                    # Flatten keys and convert to lowercase to match argparse argument names
                     config_values[key.replace("-", "_")] = value
             logger.info(f"Loaded configuration from {config_path}")
         except configparser.Error as e:
