@@ -1,164 +1,66 @@
 # Project Overview
 
-This project is a specialized tool for translating game text from Chinese (Simplified) to Vietnamese. It focuses on maintaining consistent game terminology and natural language flow, offering features like glossary support, concurrent processing, and structured output formats.
+This project (`lom-vie-translate` v2) is a specialized, production-ready tool for translating game dialogue from Chinese (Simplified) to Vietnamese for *Legend of Mortal*. It focuses on strict Unity engine data invariance, robust per-model rate limiting, true round-robin load distribution, soft validation of code tokens, and high-performance glossary matching.
 
-**Key Technologies:** Python
+**Key Technologies:** Python 3.10+, OpenAI-compatible API (`openai`), Pydantic v2, Aho-Corasick (`pyahocorasick`), aiofiles, pytest, ruff, mypy.
 
-# Building and Running
+---
 
-## Setup
+# Architecture & Package Structure
 
-1.  **Create `.env` file:** Copy the template and configure your API keys and other settings.
-    ```bash
-    cp .env.template .env
-    ```
-    Edit `.env` with your specific configurations. Example:
-    ```env
-    # API Keys (comma-separated)
-    API_KEYS=your-api-key-1,your-api-key-2,your-api-key-3
-
-    # Model Settings
-    PRIMARY_LLM_MODEL=gemma-3-27b-it
-    FALLBACK_LLM_MODELS=
-
-    # Rate Limiting and Concurrency
-    RATE_LIMIT_DELAY=2
-    RATE_LIMIT_IF_QUOTA_EXCEEDED=30
-    MAX_CONCURRENT=5
-    MAX_CONCURRENT_FILE_OPENS=999
-    MAX_GLOBAL_RETRIES=3
-
-    # Directory Configuration (paths are relative to project root)
-    INPUT_DIR=Resource/LeanLocalJson
-    OUTPUT_DIR=translated_output
-    IMPROVE_DIR=improved_output
-    GLOSSARY_DIR=Resource/glossary
-    ```
-
-2.  **Install Dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-## Usage
-
-### Translation Mode
-
-Translates Chinese (Simplified) game text to Vietnamese.
-
-```bash
-python src/main.py \
-    -m translate \
-    -id /path/to/input_jsons \
-    -od /path/to/base_output \
-    -jod /path/to/json_output (optional, defaults to --output-dir/json) \
-    -dod /path/to/details_output (optional, defaults to --output-dir/details) \
-    -pod /path/to/pairs_output (optional, defaults to --output-dir/pairs) \
-    -gf /path/to/your_glossary.json (optional) \
-    -old /path/to/old_translations (optional, for caching old translations) \
-    -olf /path/to/single_old_translation_file.json (optional, for caching old translations from a single file)
-
-# Or using long arguments:
-python src/main.py \
-    --mode translate \
-    --input-dir /path/to/input_jsons \
-    --output-dir /path/to/base_output \
-    --json-output-dir /path/to/json_output (optional, defaults to --output-dir/json) \
-    --details-output-dir /path/to/details_output (optional, defaults to --output-dir/details) \
-    --pairs-output-dir /path/to/pairs_output (optional, defaults to --output-dir/pairs) \
-    --glossary-file /path/to/your_glossary.json (optional) \
-    --old-dir /path/to/old_translations (optional, for caching old translations) \
-    --old-file /path/to/single_old_translation_file.json (optional, for caching old translations from a single file)
+```
+lom_translate/
+├── __init__.py
+├── cli.py          # Command-line interface entry point (lom-translate)
+├── client.py       # Isolated LLM client & true round-robin pool rotator
+├── config.py       # Zero-side-effect lazy configuration loader
+├── glossary.py     # Ingestion & Aho-Corasick O(N) matching
+├── logger.py       # Lazy structured logger (creates files only during run)
+├── models.py       # Pydantic models for game entries, files & configs
+├── pipeline.py     # Concurrent file processor with atomic writes
+├── prompt.py       # Contextual prompt generator with O(1) raw mapping
+├── text.py         # Injected linebreaks [|], [||] encoding & postprocessing
+└── validation.py   # Soft validators: auto-healing & token integrity checks
 ```
 
-### Improvement Mode
+---
 
-Refines existing translations.
+# Configuration (`config.json`)
 
-```bash
-python src/main.py \
-    -m improve \
-    -id /path/to/input_jsons \
-    -rd /path/to/raw_translations \
-    -od /path/to/base_output \
-    -jod /path/to/json_output (optional, defaults to --output-dir/json) \
-    -dod /path/to/details_output (optional, defaults to --output-dir/details) \
-    -pod /path/to/pairs_output (optional, defaults to --output-dir/pairs) \
-    -gf /path/to/your_glossary.json (optional) \
-    -old /path/to/old_translations (optional, for caching old translations) \
-    -olf /path/to/single_old_translation_file.json (optional, for caching old translations from a single file)
+All runtime settings live in `config.json` (gitignored). Copy `config.template.json` to configure:
+- **`models`**: Each model defines its own `id`, `url`, `api_key`, `model_name`, `temperature`, `top_p`, `top_k`, `max_retries`, `limit_per_minute`, `rate_limit_delay`, and `rate_limit_if_quota_exceeded`.
+- **`task_assignments`**: Maps tasks (`translate`, `improve`) to arrays of model IDs. The engine rotates through models in round-robin order after each call if free and within limits.
+- **`settings`**: Operational defaults (`max_concurrent`, `max_concurrent_files`, `input_dir`, `output_dir`, `glossary_dir`).
 
-# Or using long arguments:
-python src/main.py \
-    --mode improve \
-    --input-dir /path/to/input_jsons \
-    --raw-dir /path/to/raw_translations \
-    --output-dir /path/to/base_output \
-    --json-output-dir /path/to/json_output (optional, defaults to --output-dir/json) \
-    --details-output-dir /path/to/details_output (optional, defaults to --output-dir/details) \
-    --pairs-output-dir /path/to/pairs_output (optional, defaults to --output-dir/pairs) \
-    --glossary-file /path/to/your_glossary.json (optional) \
-    --old-dir /path/to/old_translations (optional, for caching old translations) \
-    --old-file /path/to/single_old_translation_file.json (optional, for caching old translations from a single file)
-```
+---
 
-## Tool Usage
+# Development Conventions & Rules
 
-The `tool/` scripts provide additional utilities for processing JSON files. These scripts now require input and output directories to be specified as command-line arguments.
+1. **Zero Module-Level Side Effects**: Importing any module in `lom_translate` must never crash, check environment variables, or create log files on disk.
+2. **Unity JSON Format Invariance**: Always support Schema A (`entries.Array`) and Schema B (flat `entries`). Reconstructed output must match input schema structure byte-for-byte.
+3. **Complete Metadata Preservation**: Never strip auxiliary engine fields (`Id`, `Speaker`, `Voice`, `Context`, etc.). Clone entries via `entry.clone_with_translation()`.
+4. **Provider-Agnostic LLM Layer**: Use OpenAI-compatible HTTP clients (`/v1/chat/completions`). Supports local LLMs (Ollama, vLLM, LM Studio) as well as cloud providers.
+5. **Per-Call Round-Robin Rotation**: The pool rotates to the next model after every single run (selecting only models that are free and within limits). If a model encounters an error, immediately rotate to the next free model.
+6. **Soft Validation & Auto-Healing**:
+   - Spacing anomalies injected by LLMs (`[ || ]`, `{ 0 : N0 }`, `</ color >`) are auto-healed without reprompting.
+   - Discrepancies in injected linebreaks (`[|]`, `[||]`), engine tokens (`{0:N0}`, `{title}`), or lingering CJK characters are logged as warnings and tracked in run stats.
+7. **Atomic Writes**: All JSON outputs are written to temporary files and renamed atomically.
+8. **Testing Guardrails**: All code changes must pass:
+   ```bash
+   pytest tests/ -v --cov=lom_translate --cov-report=term-missing
+   ruff check lom_translate tests
+   ruff format --check lom_translate tests
+   mypy lom_translate tests
+   ```
 
-### 1. `create_glossary.py`
+---
 
-Aggregates original and translated JSON files into a glossary.
+# CLI Usage
 
 ```bash
-python tool/create_glossary.py --src_folder /path/to/original_jsons --tgt_folder /path/to/translated_jsons --output_json /path/to/output_glossary.json --output_txt /path/to/output_glossary.txt
+# Translation Mode
+lom-translate -m translate -i Resource/LeanLocalJson -od translated_output
+
+# Improvement Mode
+lom-translate -m improve -i Resource/LeanLocalJson -rd raw_translations -od improved_output
 ```
-
-### 2. `filter_entries_by_category.py`
-
-Filters JSON entries into categories (e.g., 'Story', 'LegendInfo', 'Other') based on their 'Name' field.
-
-```bash
-python tool/filter_entries_by_category.py --src_folder /path/to/input_jsons --dst_base_folder /path/to/output_categorized_jsons
-```
-
-### 3. `filter_languages.py`
-
-Filters JSON files into language-specific folders based on their 'Language' field.
-
-```bash
-python tool/filter_languages.py --src_folder /path/to/input_jsons --dst_base_folder /path/to/output_language_filtered_jsons
-```
-
-### 4. `convert_translation_details.py`
-
-Converts old `translation_details.json` files (dictionary format) to the new list format.
-
-```bash
-python tool/convert_translation_details.py --input_file /path/to/old_translation_details.json --output_file /path/to/new_translation_details.json
-```
-
-### 5. `translation_mapper.py`
-
-Maps translation entries to their context, including glossary matches. This script prints the mapped data to standard output.
-
-```bash
-python tool/translation_mapper.py
-```
-
-### 6. `improve_glossary.py`
-
-Prepares improvement prompts for entries in a glossary file.
-
-```bash
-python tool/improve_glossary.py --glossary-file /path/to/your_glossary.json --output-dir /path/to/output_prompts
-```
-
-# Development Conventions
-
-*   **Language:** Python
-*   **Configuration:** Uses a `.env` file for environment-specific settings and `src/config.py` for application configuration.
-*   **Logging:** Includes a dedicated `src/logger.py` for structured logging.
-*   **Modularity:** The project is structured into distinct modules for file processing, glossary management, prompt preparation, and translation engine interfacing.
-*   **Consistent Logging:** All logging now uses the `src/logger.py` instance for better consistency and file output.
-*   **Robust API Handling:** The `src/translator.py` now includes robust API key rotation, fallback model mechanisms, and global retry logic (`MAX_GLOBAL_RETRIES`) to enhance reliability and handle rate limits or quota issues more gracefully. The `RATE_LIMIT_IF_QUOTA_EXCEEDED` has been adjusted to `30` seconds.

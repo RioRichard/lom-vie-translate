@@ -1,284 +1,214 @@
-# Chinese to Vietnamese Text Translator for Lengend of Mortal
+# Chinese to Vietnamese Text Translator for Legend of Mortal (`lom-vie-translate` v2)
 
-A specialized tool for translating game text from Chinese (Simplified) to Vietnamese for Legend of Mortal, with a focus on maintaining consistent game terminology and natural language flow.
+A production-ready, provider-agnostic game localization pipeline for translating and refining game dialogue from Chinese (Simplified) to Vietnamese for *Legend of Mortal*.
 
-## Features
+Designed for robustness under heavy API concurrency, strict preservation of Unity engine data formats, per-model rate limiting, and intelligent soft validation of formatting tokens.
 
-- Translation from Chinese (Simplified) to Vietnamese
-- Improvement mode for refining existing translations
-- Glossary support for consistent terminology
-- Concurrent processing for better performance
-- Structured output formats:
-  - Individual JSON files maintaining original structure
-  - Consolidated translation details
-  - Translation pairs in text format
+---
 
-## Project Structure
+## Key Features
 
-```
-src/
-├── config.py          # Configuration and settings
-├── file_processor.py  # File handling and processing
-├── glossary.py       # Glossary management
-├── logger.py         # Logging utilities
-├── main.py           # Main entry point
-├── prompt_preparer.py # Translation prompt preparation
-├── translator.py     # Translation engine interface
-└── utils.py         # Utility functions
-```
+- **Provider-Agnostic LLM Engine**: Integrates natively with any OpenAI-compatible endpoint—local models (Ollama, vLLM, LM Studio, llama.cpp), OpenAI, Google Gemini, and DeepSeek.
+- **Per-Model Autonomous Rate Limiting**: Each configured model defines its own retry limit, request-per-minute window (`limit_per_minute`), request delay, and quota backoff.
+- **True Per-Call Round-Robin Rotation**: The system rotates to the next available model in the task pool after **each call** (only selecting models that are free and within rate limits). If a model encounters transient errors, the request immediately rotates to the next model rather than repeatedly hammering the failing endpoint.
+- **Soft Validation & Auto-Healing**:
+  - Automatically heals spacing discrepancies introduced by LLMs around code markers (`[ || ]` $\to$ `[||]`, `{ 0 : N0 }` $\to$ `{0:N0}`, `</ color>` $\to$ `</color>`).
+  - Validates preservation of injected linebreak markers (`[|]`, `[||]`), engine interpolation tokens (`{0:N0}`, `{title}`), and Unity rich text tags (`<color>`, `<b>`).
+  - Scans for lingering untranslated Chinese characters without aborting the batch.
+- **Strict Unity JSON Format Invariance**: Supports both Schema A (`entries.Array`) and Schema B (flat `entries`), preserving all auxiliary engine metadata (`Id`, `Speaker`, `Voice`, `Context`, `Sound`, etc.).
+- **High-Performance Glossary Engine**: Ingests both dictionary (`{"term": "dịch"}`) and list formats, using an Aho-Corasick automaton (`pyahocorasick`) for $O(\text{text length})$ term matching with longest-match substring deduplication.
+- **Atomic Disk Writes**: All file outputs are written to temporary files and renamed atomically to eliminate data corruption.
 
-## Setup
+---
 
-1. Create a .env file from the template:
+## Installation
+
+Requires Python 3.10 or newer.
+
 ```bash
-cp .env.template .env
+# Clone the repository
+git clone https://github.com/RioRichard/lom-vie-translate.git
+cd lom-vie-translate
+
+# Create and activate a virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install the package and dependencies
+pip install -e .
+
+# Or install with development dependencies (pytest, ruff, mypy)
+pip install -e ".[dev]"
 ```
 
-2. Configure your environment variables in .env:
-```env
-# API Keys (comma-separated)
-API_KEYS=your-api-key-1,your-api-key-2,your-api-key-3
+---
 
-# Model Settings
-PRIMARY_LLM_MODEL=gemma-3-27b-it
-FALLBACK_LLM_MODELS=
+## Configuration (`config.json`)
 
-# Rate Limiting and Concurrency
-RATE_LIMIT_DELAY=2
-RATE_LIMIT_IF_QUOTA_EXCEEDED=30
-MAX_CONCURRENT=5
-MAX_CONCURRENT_FILE_OPENS=999
-MAX_GLOBAL_RETRIES=3
+All secrets and operational settings live in a single `config.json` file in the project root. This file is **gitignored** to prevent credential leaks.
 
-# Directory Configuration (paths are relative to project root)
-INPUT_DIR=Resource/LeanLocalJson
-OUTPUT_DIR=translated_output
-IMPROVE_DIR=improved_output
-GLOSSARY_DIR=Resource/glossary
-```
+Copy the template to get started:
 
-2. Install dependencies:
 ```bash
-pip install -r requirements.txt
+cp config.template.json config.json
 ```
 
-## Input File Structure
-
-The tool expects JSON files with the following structure:
+### Example `config.json`
 
 ```json
 {
-    "Language": "ChineseSimplified",
-    "entries": {
-        "Array": [
-            {
-                "Name": "Story/Chapter1/Dialog001",
-                "Text": "你托人送了信，自己独行下山，加紧脚步往江陵发进。"
-            },
-            {
-                "Name": "Story/Chapter1/Action001",
-                "Text": "整装"
-            }
-        ]
-    }
-}
-```
-
-Or alternatively:
-
-```json
-{
-    "Language": "ChineseSimplified",
-    "entries": [
-        {
-            "Name": "Story/Chapter1/Dialog001",
-            "Text": "你托人送了信，自己独行下山，加紧脚步往江陵发进。"
-        },
-        {
-            "Name": "Story/Chapter1/Action001",
-            "Text": "整装"
-        }
-    ]
-}
-```
-
-Key components:
-- `Language`: Must be "ChineseSimplified" (files with other languages will be skipped)
-- `entries`: Can be either an object with an "Array" field or a direct array
-- Each entry must have:
-  - `Name`: Unique identifier/path for the text
-  - `Text`: The actual Chinese text to be translated
-
-### Glossary Structure
-
-The glossary files should be JSON files with either of these formats:
-
-```json
-[
+  "models": [
     {
-        "Name": "UI/Button/Confirm",
-        "Original": "确认",
-        "Translated": "Xác nhận"
+      "id": "my-local-llm",
+      "url": "http://localhost:11434/v1",
+      "api_key": "not-needed",
+      "model_name": "llama3.1:70b",
+      "temperature": 0.1,
+      "top_p": 0.9,
+      "top_k": 40,
+      "max_retries": 2,
+      "limit_per_minute": 30,
+      "rate_limit_delay": 0.5,
+      "rate_limit_if_quota_exceeded": 10.0
+    },
+    {
+      "id": "gemini-flash",
+      "url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+      "api_key": "your-gemini-api-key",
+      "model_name": "gemini-2.0-flash",
+      "temperature": 0.1,
+      "top_p": 0.9,
+      "top_k": 40,
+      "max_retries": 3,
+      "limit_per_minute": 15,
+      "rate_limit_delay": 1.0,
+      "rate_limit_if_quota_exceeded": 30.0
+    },
+    {
+      "id": "gpt4o-mini",
+      "url": "https://api.openai.com/v1",
+      "api_key": "sk-your-openai-key",
+      "model_name": "gpt-4o-mini",
+      "temperature": 0.1,
+      "top_p": 0.9,
+      "top_k": null,
+      "max_retries": 3,
+      "limit_per_minute": 60,
+      "rate_limit_delay": 0.5,
+      "rate_limit_if_quota_exceeded": 20.0
     }
-]
-```
+  ],
 
-Or:
+  "task_assignments": {
+    "translate": ["gemini-flash", "my-local-llm"],
+    "improve": ["gemini-flash", "my-local-llm"],
+    "glossary_improve": ["gpt4o-mini", "my-local-llm"]
+  },
 
-```json
-{
-    "UI/Button/Confirm": "Xác nhận"
+  "settings": {
+    "max_concurrent": 5,
+    "max_concurrent_files": 3,
+    "max_global_retries": 3,
+    "input_dir": "Resource/LeanLocalJson",
+    "output_dir": "translated_output",
+    "glossary_dir": "Resource/glossary"
+  }
 }
 ```
 
-The glossary helps maintain consistent translations for frequently used terms.
+---
 
-## Usage
+## CLI Usage
 
-### Translation Mode
+The CLI command is `lom-translate` (or `python3 -m lom_translate.cli`).
+
+### 1. Translation Mode
+
+Translates raw Chinese dialogue files to Vietnamese:
+
 ```bash
-python src/main.py \
+# Basic usage (reads directories and models from config.json):
+lom-translate -m translate
+
+# With explicit overrides:
+lom-translate \
     -m translate \
-    -id /path/to/input_jsons \
-    -od /path/to/base_output \
-    -jod /path/to/json_output (optional, defaults to --output-dir/json) \
-    -dod /path/to/details_output (optional, defaults to --output-dir/details) \
-    -pod /path/to/pairs_output (optional, defaults to --output-dir/pairs) \
-    -gf /path/to/your_glossary.json (optional) \
-    -old /path/to/old_translations (optional, for caching old translations) \
-    -olf /path/to/single_old_translation_file.json (optional, for caching old translations from a single file)
-
-# Or using long arguments:
-python src/main.py \
-    --mode translate \
-    --input-dir /path/to/input_jsons \
-    --output-dir /path/to/base_output \
-    --json-output-dir /path/to/json_output (optional, defaults to --output-dir/json) \
-    --details-output-dir /path/to/details_output (optional, defaults to --output-dir/details) \
-    --pairs-output-dir /path/to/pairs_output (optional, defaults to --output-dir/pairs) \
-    --glossary-file /path/to/your_glossary.json (optional) \
-    --old-dir /path/to/old_translations (optional, for caching old translations) \
-    --old-file /path/to/single_old_translation_file.json (optional, for caching old translations from a single file)
+    -i /path/to/chinese_jsons \
+    -od /path/to/output_dir \
+    -gf /path/to/custom_glossary.json \
+    -old /path/to/existing_translated_dir
 ```
 
-### Improvement Mode
+### 2. Improvement Mode
+
+Refines previous raw translations using context and glossary rules:
+
 ```bash
-python src/main.py \
+lom-translate \
     -m improve \
-    -i /path/to/input_jsons \
+    -i /path/to/chinese_jsons \
     -rd /path/to/raw_translations \
-    -od /path/to/base_output \
-    -jod /path/to/json_output (optional, defaults to --output-dir/json) \
-    -dod /path/to/details_output (optional, defaults to --output-dir/details) \
-    -pod /path/to/pairs_output (optional, defaults to --output-dir/pairs) \
-    -gf /path/to/your_glossary.json (optional) \
-    -old /path/to/old_translations (optional, for caching old translations) \
-    -olf /path/to/single_old_translation_file.json (optional, for caching old translations from a single file)
-
-# Or using long arguments:
-python src/main.py \
-    --mode improve \
-    --input-dir /path/to/input_jsons \
-    --raw-dir /path/to/raw_translations \
-    --output-dir /path/to/base_output \
-    --json-output-dir /path/to/json_output (optional, defaults to --output-dir/json) \
-    --details-output-dir /path/to/details_output (optional, defaults to --output-dir/details) \
-    --pairs-output-dir /path/to/pairs_output (optional, defaults to --output-dir/pairs) \
-    --glossary-file /path/to/your_glossary.json (optional) \
-    --old-dir /path/to/old_translations (optional, for caching old translations) \
-    --old-file /path/to/single_old_translation_file.json (optional, for caching old translations from a single file)
+    -od /path/to/improved_output \
+    -gf /path/to/custom_glossary.json
 ```
 
-## Tool Usage
+### CLI Arguments Reference
 
-The `tool/` scripts provide additional utilities for processing JSON files. These scripts now require input and output directories to be specified as command-line arguments.
+| Option | Short Alias | Description |
+|---|---|---|
+| `--mode` | `-m` | Execution mode: `translate` or `improve` (required) |
+| `--config` | `-c` | Path to configuration file (default: `config.json`) |
+| `--input-dir` | `-id`, `-i` | Input directory containing game JSON files |
+| `--output-dir` | `-od` | Base output directory |
+| `--raw-dir` | `-rd` | Directory containing raw translations (required for `improve`) |
+| `--glossary-file`| `-gf` | Specific glossary JSON or TXT file to load |
+| `--old-dir` | `-old` | Directory of existing translations for caching |
+| `--old-file` | `-olf` | Single file of existing translations for caching |
 
-### 1. `create_glossary.py`
-
-Aggregates original and translated JSON files into a glossary.
-
-```bash
-python tool/create_glossary.py --src_folder /path/to/original_jsons --tgt_folder /path/to/translated_jsons --output_json /path/to/output_glossary.json --output_txt /path/to/output_glossary.txt
-```
-
-### 2. `filter_entries_by_category.py`
-
-Filters JSON entries into categories (e.g., 'Story', 'LegendInfo', 'Other') based on their 'Name' field.
-
-```bash
-python tool/filter_entries_by_category.py --src_folder /path/to/input_jsons --dst_base_folder /path/to/output_categorized_jsons
-```
-
-### 3. `filter_languages.py`
-
-Filters JSON files into language-specific folders based on their 'Language' field.
-
-```bash
-python tool/filter_languages.py --src_folder /path/to/input_jsons --dst_base_folder /path/to/output_language_filtered_jsons
-```
-
-### 4. `convert_translation_details.py`
-
-Converts old `translation_details.json` files (dictionary format) to the new list format.
-
-```bash
-python tool/convert_translation_details.py --input_file /path/to/old_translation_details.json --output_file /path/to/new_translation_details.json
-```
-
-### 5. `translation_mapper.py`
-
-Maps translation entries to their context, including glossary matches. This script prints the mapped data to standard output.
-
-```bash
-python tool/translation_mapper.py
-```
+---
 
 ## Output Structure
 
-The tool generates three types of output:
+The output directory contains three artifacts:
 
-### 1. Individual JSON Files
-Maintains the original structure with translated text:
-```json
-{
-    "Language": "ChineseSimplified",
-    "entries": {
-        "Array": [
-            {
-                "Name": "Story/Chapter1/Dialog001",
-                "Text": "Ngươi phái người đưa thư, tự mình độc hành xuống núi, thúc ngựa lao về Giang Lăng."
-            }
-        ]
-    }
-}
+```
+translated_output/
+├── json/                         # Preserves game JSON schema & extra metadata
+│   ├── Story_Chapter1.json
+│   └── Combat_Skills.json
+├── details/
+│   └── translation_details.json  # Comprehensive entry-level audit log
+└── pairs/
+    └── translation_pairs.txt     # Fast lookup key=value translation cache
 ```
 
-### 2. Translation Details (translation_details.json)
-Consolidated file containing all translations:
-```json
-[
-    {
-        "Name": "Story/Chapter1/Dialog001",
-        "Original": "你托人送了信，自己独行下山，加紧脚步往江陵发进。",
-        "Translated": "Ngươi phái người đưa thư, tự mình độc hành xuống núi, thúc ngựa lao về Giang Lăng.",
-        "Raw": "Ngươi sai người đưa thư, mình độc hành xuống núi, gấp rút bước chân hướng Giang Lăng phát tiến."
-    }
-]
-```
-Note: The "Raw" field is only present in improve mode.
+---
 
-### 3. Translation Pairs (translation_pairs.txt)
-Simple text file with original=translation pairs:
-```text
-你托人送了信，自己独行下山，加紧脚步往江陵发进。=Ngươi phái người đưa thư, tự mình độc hành xuống núi, thúc ngựa lao về Giang Lăng.
-整装=Chuẩn bị
+## Tools Roadmap
+
+Utility scripts from the previous release are set aside during core re-initialization and will be integrated directly into the unified `lom-translate` CLI in a future release:
+
+```bash
+lom-translate --tool create-glossary --src ... --tgt ...
+lom-translate --tool filter-category --src ... --dst ...
+lom-translate --tool filter-language --src ... --dst ...
+lom-translate --tool convert-details --input ... --output ...
+lom-translate --tool improve-glossary --glossary ...
+lom-translate --tool map-context --input ...
 ```
 
-## Notes
+---
 
-- The tool focuses on game text translation and maintains context appropriately
-- Special attention is given to short phrases and game terminology
-- Concurrent processing is used to optimize performance
-- Logging system provides detailed progress and error tracking
-- **Consistent Logging:** All logging now uses the `src/logger.py` instance for better consistency and file output.
-- **Robust API Handling:** The `src/translator.py` now includes robust API key rotation, fallback model mechanisms, and global retry logic (`MAX_GLOBAL_RETRIES`) to enhance reliability and handle rate limits or quota issues more gracefully. The `RATE_LIMIT_IF_QUOTA_EXCEEDED` has been adjusted to `30` seconds.
+## Running Tests & Quality Checks
+
+```bash
+# Run pytest test suite with code coverage
+pytest tests/ -v --cov=lom_translate --cov-report=term-missing
+
+# Lint and verify code formatting
+ruff check lom_translate tests
+ruff format --check lom_translate tests
+
+# Static type validation
+mypy lom_translate tests
+```

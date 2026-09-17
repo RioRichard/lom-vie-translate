@@ -1,0 +1,65 @@
+{
+  "models": [
+    {
+      "id": "my-local-llm",
+      "url": "http://localhost:11434/v1",
+      "api_key": "not-needed",
+      "model_name": "llama3.1:70b",
+      "temperature": 0.1,
+      "top_p": 0.9,
+      "top_k": 40,
+      "max_retries": 2,
+      "limit_per_minute": 30,
+      "rate_limit_delay": 0.5,
+      "rate_limit_if_quota_exceeded": 10.0
+    },
+    {
+      "id": "gemini-flash",
+      "url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+      "api_key": "your-gemini-api-key",
+      "model_name": "gemini-2.0-flash",
+      "temperature": 0.1,
+      "top_p": 0.9,
+      "top_k": 40,
+      "max_retries": 3,
+      "limit_per_minute": 15,
+      "rate_limit_delay": 1.0,
+      "rate_limit_if_quota_exceeded": 30.0
+    },
+    {
+      "id": "gpt4o-mini",
+      "url": "https://api.openai.com/v1",
+      "api_key": "sk-your-openai-key",
+      "model_name": "gpt-4o-mini",
+      "temperature": 0.1,
+      "top_p": 0.9,
+      "top_k": null,
+      "max_retries": 3,
+      "limit_per_minute": 60,
+      "rate_limit_delay": 0.5,
+      "rate_limit_if_quota_exceeded": 20.0
+    }
+  ],
+  "task_assignments": {
+    "translate": [
+      "gemini-flash",
+      "my-local-llm"
+    ],
+    "improve": [
+      "gemini-flash",
+      "my-local-llm"
+    ],
+    "glossary_improve": [
+      "gpt4o-mini",
+      "my-local-llm"
+    ]
+  },
+  "settings": {
+    "max_concurrent": 5,
+    "max_concurrent_files": 3,
+    "max_global_retries": 3,
+    "input_dir": "Resource/LeanLocalJson",
+    "output_dir": "translated_output",
+    "glossary_dir": "Resource/glossary"
+  }
+}

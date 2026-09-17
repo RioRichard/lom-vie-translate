@@ -1,16 +1,7 @@
 # Python
 __pycache__/
-*venv/
-ENV/
-env/
-env.bak/
-venv.bak/
-.env
-bin/
-lib64/
-lib64
-include/
-pyvenv.cfg$py.class
+*.py[cod]
+*$py.class
 *.so
 .Python
 build/
@@ -30,35 +21,37 @@ wheels/
 *.egg
 
 # Virtual Environment
+.venv/
 venv/
 ENV/
 env/
-env.bak/
-venv.bak/
-.env
-bin/
-lib64/**
-include/
-pyvenv.cfg
 
-# IDE
+# Secrets and Local Configuration
+config.json
+.env
+.env.*
+!.env.template
+
+# IDE & Editor
 .idea/
 .vscode/
 *.swp
 *.swo
 
-# Project specific
-testcase/
-Resource/
-old_code/
-logs/
-translated_output_json/
+# Testing & Quality Tools
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 
-# Allow
-!src/
-!requirements.txt
-!README.md
-!.gitignore
-!.env.template
+# Logs & Runtime Outputs
+logs/
+translated_output/
+improved_output/
+translated_output_json/
+
+# Game Resources & Agent Data
+Resource/
+testcase/
+.agents/
