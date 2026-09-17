@@ -80,6 +80,7 @@ class Settings(BaseModel):
     max_concurrent: int = 5
     max_concurrent_files: int = 3
     max_global_retries: int = 3
+    soft_validation_max_retries: int = 2
     input_dir: str = "Resource/LeanLocalJson"
     output_dir: str = "translated_output"
     glossary_dir: str = "Resource/glossary"

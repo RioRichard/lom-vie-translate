@@ -58,6 +58,7 @@
     "max_concurrent": 5,
     "max_concurrent_files": 3,
     "max_global_retries": 3,
+    "soft_validation_max_retries": 2,
     "input_dir": "Resource/LeanLocalJson",
     "output_dir": "translated_output",
     "glossary_dir": "Resource/glossary"

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from lom_translate.models import LocalizationEntry, LocalizationFile
+from lom_translate.models import LocalizationEntry, LocalizationFile, Settings
 
 
 def test_schema_a_parsing(sample_schema_a_dict):
@@ -84,3 +84,13 @@ def test_entry_key_value_alias_polymorphism():
     entry_nt = LocalizationEntry.model_validate({"Name": "MyKey2", "Text": "MyValue2"})
     assert entry_nt.Name == "MyKey2"
     assert entry_nt.Text == "MyValue2"
+
+
+def test_settings_soft_validation_max_retries():
+    """Verify Settings model exposes soft_validation_max_retries with default 2."""
+    default_settings = Settings()
+    assert default_settings.soft_validation_max_retries == 2
+
+    custom_settings = Settings(soft_validation_max_retries=5)
+    assert custom_settings.soft_validation_max_retries == 5
+

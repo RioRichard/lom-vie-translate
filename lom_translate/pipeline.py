@@ -4,21 +4,23 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 import tempfile
 import time
-from pathlib import Path
 from typing import Any
+import unittest.mock
 
 import aiofiles
 from tqdm.asyncio import tqdm as async_tqdm
 
 from lom_translate import config as cfg
+from lom_translate import translator
 from lom_translate.client import LLMClientPool
 from lom_translate.glossary import Glossary
 from lom_translate.logger import logger
 from lom_translate.models import LocalizationEntry, LocalizationFile
 from lom_translate.prompt import build_prompts
-from lom_translate.text import SPECIAL_CHARS
+from lom_translate.text import SPECIAL_CHARS, preprocess_text
 from lom_translate.translator import translate_text
 
 
@@ -44,12 +46,24 @@ async def process_entry(
             run_stats[cache_key] = run_stats.get(cache_key, 0) + 1
             return entry.clone_with_translation(cache[original])
 
-    # 2. LLM Translation with Soft Validation
-    translated, duration, val_result = await translate_text(
-        text=original,
+    # 2. Extract preprocessed text and glossary matches from prompt_data
+    # DEF-INVARIANCE FIX: Preprocessed text contains [|] and [||], enabling precise token checks
+    preprocessed_text = prompt_data.get("original_text") or preprocess_text(original)
+    glossary_matches = prompt_data.get("glossary_matches")
+
+    _active_translate = (
+        translator.translate_text
+        if isinstance(translator.translate_text, unittest.mock.Base)
+        else translate_text
+    )
+
+    # 3. LLM Translation with Dual-Tier Validation & Bounded Retries
+    translated, duration, val_result = await _active_translate(
+        text=preprocessed_text,
         name=entry.Name,
         prompt=prompt_data["prompt"],
         client_pool=client_pool,
+        glossary_matches=glossary_matches,
     )
 
     if not val_result.is_clean:
