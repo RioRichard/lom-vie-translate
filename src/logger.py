@@ -1,30 +1,44 @@
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Any
+
 from tqdm import tqdm
 
 # Define custom log levels for our specific needs
 TRANSLATION = 25  # Between INFO and WARNING
 logging.addLevelName(TRANSLATION, "TRANSLATION")
 
+_NOISY_LOGGERS = ("LiteLLM", "litellm", "httpx", "httpcore")
+
 
 class TranslationLogger:
-    def __init__(self, log_dir="logs"):
+    def __init__(self, log_dir: str | Path = "logs") -> None:
         self.logger = logging.getLogger("translation")
         self.logger.setLevel(logging.DEBUG)
+        self._default_log_dir = Path(log_dir)
+        self._file_handler: logging.FileHandler | None = None
+        self._log_file: Path | None = None
 
-        # Suppress warnings from google.generativeai library
-        logging.getLogger("google.generativeai").setLevel(logging.ERROR)
+        # Suppress noisy third-party loggers
+        for noisy_name in _NOISY_LOGGERS:
+            logging.getLogger(noisy_name).setLevel(logging.WARNING)
 
-        # Create log directory if it doesn't exist
-        log_dir = Path(log_dir)
-        log_dir.mkdir(parents=True, exist_ok=True)
+    def enable_file_logging(self, log_dir: str | Path | None = None) -> Path:
+        """Lazily create the log directory and attach a UTF-8 FileHandler (idempotent)."""
+        if (
+            self._file_handler is not None
+            and self._log_file is not None
+            and self._file_handler in self.logger.handlers
+        ):
+            return self._log_file
 
-        # Create timestamp for log file
+        target_dir = Path(log_dir) if log_dir is not None else self._default_log_dir
+        target_dir.mkdir(parents=True, exist_ok=True)
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_file = log_dir / f"translation_{timestamp}.log"
+        log_file = target_dir / f"translation_{timestamp}.log"
 
-        # File handler with detailed format
         file_handler = logging.FileHandler(log_file, encoding="utf-8")
         file_handler.setLevel(logging.DEBUG)
         file_format = logging.Formatter(
@@ -32,60 +46,71 @@ class TranslationLogger:
         )
         file_handler.setFormatter(file_format)
 
-        # Add handlers to logger
         self.logger.addHandler(file_handler)
+        self._file_handler = file_handler
+        self._log_file = log_file
+        return log_file
 
-    def translation(self, msg, *args, **kwargs):
-        """Log translation-specific information"""
+    @staticmethod
+    def _format_msg(msg: Any, args: tuple[Any, ...]) -> str:
+        if args:
+            try:
+                return str(msg) % args
+            except Exception:
+                return str(msg)
+        return str(msg)
+
+    @staticmethod
+    def mask_api_key(api_key: str | None) -> str:
+        """Safely mask an API key for debug logging."""
+        if not api_key:
+            return "<none>"
+        if len(api_key) <= 14:
+            return "***"
+        return f"{api_key[:6]}...{api_key[-4:]}"
+
+    def translation(self, msg: Any, *args: Any, **kwargs: Any) -> None:
+        """Log translation-specific information."""
         self.logger.log(TRANSLATION, msg, *args, **kwargs)
-        tqdm.write(f"[TRANSLATION] {msg}", *args, **kwargs, nolock=False)
+        tqdm.write(f"[TRANSLATION] {self._format_msg(msg, args)}", nolock=False)
 
-    def debug(self, msg, *args, **kwargs):
-        """Log detailed information for debugging"""
+    def debug(self, msg: Any, *args: Any, **kwargs: Any) -> None:
+        """Log detailed information for debugging."""
         self.logger.debug(msg, *args, **kwargs)
 
-    def info(self, msg, *args, **kwargs):
-        """Log general information about program execution"""
+    def info(self, msg: Any, *args: Any, **kwargs: Any) -> None:
+        """Log general information about program execution."""
         self.logger.info(msg, *args, **kwargs)
-        tqdm.write(msg, *args, **kwargs, nolock=False)
+        tqdm.write(self._format_msg(msg, args), nolock=False)
 
-    def warning(self, msg, *args, **kwargs):
-        """Log warnings about potential issues"""
+    def warning(self, msg: Any, *args: Any, **kwargs: Any) -> None:
+        """Log warnings about potential issues."""
         self.logger.warning(msg, *args, **kwargs)
-        tqdm.write(f"[WARNING] {msg}", *args, **kwargs, nolock=False)
+        tqdm.write(f"[WARNING] {self._format_msg(msg, args)}", nolock=False)
 
-    def error(self, msg, *args, **kwargs):
-        """Log errors that don't stop program execution"""
+    def error(self, msg: Any, *args: Any, **kwargs: Any) -> None:
+        """Log errors that don't stop program execution."""
         self.logger.error(msg, *args, **kwargs)
-        tqdm.write(f"[ERROR] {msg}", *args, **kwargs, nolock=False)
+        tqdm.write(f"[ERROR] {self._format_msg(msg, args)}", nolock=False)
 
-    def critical(self, msg, *args, **kwargs):
-        """Log critical errors that might stop program execution"""
+    def critical(self, msg: Any, *args: Any, **kwargs: Any) -> None:
+        """Log critical errors that might stop program execution."""
         self.logger.critical(msg, *args, **kwargs)
-        tqdm.write(f"[CRITICAL] {msg}", *args, **kwargs)
+        tqdm.write(f"[CRITICAL] {self._format_msg(msg, args)}", nolock=False)
 
     def translation_detail(
         self,
-        name,
-        original,
-        translated,
-        duration,
-        raw_translation=None,
-        mode="translate",
-    ):
-        """Log details of a single translation
-
-        Args:
-            name: Entry name/key
-            original: Original text
-            translated: Final translated/improved text
-            duration: Time taken for translation
-            raw_translation: Raw translation (for improve mode)
-            mode: 'translate' or 'improve'
-        """
+        name: str,
+        original: str,
+        translated: str,
+        duration: float,
+        raw_translation: str | None = None,
+        mode: str = "translate",
+    ) -> None:
+        """Log details of a single translation."""
         action = "Translation" if mode == "translate" else "Improvement"
         message = (
-            f"{action} completed in {duration:.2f}s\n )"
+            f"{action} completed in {duration:.2f}s\n"
             f"    Name: {name}\n"
             f"    Original: {original}\n"
         )
@@ -99,22 +124,26 @@ class TranslationLogger:
 
     def run_summary(
         self,
-        files_processed,
-        total_translations,
-        total_time,
-        from_cache=0,
-        from_glossary=0,
-        empty_lines=0,
-        special_chars=0,
-        from_reuse_translation=0,
-    ):
-        """Log a summary of the entire run"""
-        new_translations = (
+        files_processed: int,
+        total_translations: int,
+        total_time: float,
+        from_cache: int = 0,
+        from_glossary: int = 0,
+        empty_lines: int = 0,
+        special_chars: int = 0,
+        from_reuse_translation: int = 0,
+        failed: int = 0,
+    ) -> None:
+        """Log a summary of the entire run to both file (when enabled) and console."""
+        new_translations = max(
+            0,
             total_translations
             - from_cache
             - from_glossary
+            - from_reuse_translation
             - empty_lines
             - special_chars
+            - failed,
         )
         summary = (
             f"\nRun Summary:\n"
@@ -126,34 +155,29 @@ class TranslationLogger:
             f"      - Special Characters: {special_chars}\n"
             f"      - New Translations: {new_translations}\n"
             f"      - Reuse Translations: {from_reuse_translation}\n"
+            f"      - Failed: {failed}\n"
             f"    Total Time: {total_time:.2f}s"
         )
-        tqdm.write(summary)
+        self.info(summary)
 
-    def api_call(self, key_index, api_key, model_name):
-        """Log API key and model usage"""
-        masked_key = f"{api_key[:10]}...{api_key[-4:]}"
-        self.debug(f"Using Model: {model_name}, API key {key_index}: {masked_key}")
+    def api_call(self, key_index: int, api_key: str | None, route_label: str) -> None:
+        """Log API key and route usage with masked credentials."""
+        masked_key = self.mask_api_key(api_key)
+        self.debug(f"Using Route: {route_label}, API key {key_index}: {masked_key}")
 
-    def translation_start(self, name, text, model_name):
-        """Log the start of a translation"""
-        self.debug(
-            f"Starting translation for {name} with Model {model_name}: {text[:50]}..."
-        )
+    def translation_start(self, name: str | None, text: str, route_label: str) -> None:
+        """Log the start of a translation."""
+        self.debug(f"Starting translation for {name} with Route {route_label}: {text[:50]}...")
 
-    def translation_output(self, text, duration, model_name):
-        """Log translation output"""
-        self.debug(f"Translation with Model {model_name} completed in {duration:.2f}s")
+    def translation_output(self, text: str, duration: float, route_label: str) -> None:
+        """Log translation output."""
+        self.debug(f"Translation with Route {route_label} completed in {duration:.2f}s")
         self.debug(f"Output: {text}")
 
-    def concurrent_info(self, count, workers):
-        """Log concurrent processing information"""
-        tqdm.write(f"Processing {count} entries with {workers} concurrent workers")
-
-    def google_api_warning(self, message):
-        """Log Google API related warnings at debug level to reduce noise"""
-        self.debug(f"Google API: {message}")
+    def concurrent_info(self, count: int, workers: int) -> None:
+        """Log concurrent processing information."""
+        self.info(f"Processing {count} entries with {workers} concurrent workers")
 
 
-# Create a global logger instance
+# Create a global logger instance (no file I/O at import time)
 logger = TranslationLogger()

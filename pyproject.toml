@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lom-vie-translate"
+version = "0.2.0"
+description = "Chinese (Simplified) to Vietnamese game text translator for Legend of Mortal"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "litellm>=1.60.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "aiofiles>=24.1.0",
+    "tqdm>=4.66.0",
+]
+
+[project.scripts]
+lom-translate = "src.main:main"
+lom-improve-glossary = "tool.improve_glossary:main_cli"
+lom-unpack-game = "tool.unpack_game:main_cli"
+lom-patch-game = "tool.patch_game:main_cli"
+lom-build-flowchart = "tool.build_story_flowchart:main_cli"
+lom-build-matrix = "tool.build_relationship_matrix:main_cli"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.8.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src", "tool"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]

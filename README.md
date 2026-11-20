@@ -1,284 +1,469 @@
-# Chinese to Vietnamese Text Translator for Lengend of Mortal
+# Chinese to Vietnamese Game Text Translator for Legend of Mortal
 
-A specialized tool for translating game text from Chinese (Simplified) to Vietnamese for Legend of Mortal, with a focus on maintaining consistent game terminology and natural language flow.
+A specialized asynchronous Python tool for translating ***Legend of Mortal*** game text from **Chinese (Simplified)** (`ChineseSimplified`) to **Vietnamese**, maintaining wuxia/historical tone, consistent terminology, and in-game formatting markers.
 
 ## Features
 
-- Translation from Chinese (Simplified) to Vietnamese
-- Improvement mode for refining existing translations
-- Glossary support for consistent terminology
-- Concurrent processing for better performance
-- Structured output formats:
-  - Individual JSON files maintaining original structure
-  - Consolidated translation details
-  - Translation pairs in text format
+- **Zero-UABEA Game Unpack & Patch**: Direct Unity 2020.3.49f1 (SerializedFile v22) extraction (`lom-unpack-game`) and patch building/installation/backup restore (`lom-patch-game`) on `Mortal_Data/`.
+- **Story Flowchart & Relationship Matrix (*Xưng Hô*) Context**: Extracts Lua story scripts and character relationships to translate `Story/` dialogues in script execution order with a live sliding dialogue window, speaker/mood metadata, and context-safe `{Name}::{Original}` caching.
+- **Multi-Provider LLM Engine (`litellm`)**: Supports local OpenAI-compatible servers (LM Studio, llama.cpp, vLLM) and cloud APIs (Google Gemini, OpenRouter) from a single `config.toml`.
+- **Universal Multi-Key Rotation & Tiered Fallback**: Every `(provider, tier)` supports comma-separated API keys in `.env` with round-robin rotation, independent concurrency/rate limiting, ordered fallback chains, and global retry cycles.
+- **Two Core Workflows + Glossary Improvement**:
+  - `translate` mode: Translates Chinese (Simplified) JSON files to Vietnamese.
+  - `improve` mode: Refines existing raw translations against the Chinese originals.
+  - `improve_glossary` task (`lom-improve-glossary`): Refines glossary JSON entries using the configured LLM.
+- **3-Tier Caching & Reuse**: Exact glossary lookup -> in-run deduplication (only successful translations cached) -> previous-translation reuse (`--old-dir` / `--old-file`) before calling an LLM.
+- **Structured Outputs**:
+  - Per-file translated JSON files preserving original structure (`entries.Array` or direct `entries` list)
+  - Consolidated `translation_details.json`
+  - Escaped `translation_pairs.txt`
+  - Lazy per-run log files (`logs/translation_<timestamp>.log`)
 
 ## Project Structure
 
-```
-src/
-├── config.py          # Configuration and settings
-├── file_processor.py  # File handling and processing
-├── glossary.py       # Glossary management
-├── logger.py         # Logging utilities
-├── main.py           # Main entry point
-├── prompt_preparer.py # Translation prompt preparation
-├── translator.py     # Translation engine interface
-└── utils.py         # Utility functions
+```text
+.
+├── .python-version           # Python 3.12 pin
+├── pyproject.toml            # uv / hatchling config, dependencies, console scripts, pytest & ruff
+├── uv.lock                   # Locked dependency graph
+├── .env.template             # API key & LOM_CONFIG_FILE template
+├── config.toml.template      # Multi-provider [run], [providers.*], [tasks.*] template
+├── GEMINI.md                 # Engineering rules, deep architecture & roadmap
+├── README.md                 # Project documentation (this file)
+├── src/
+│   ├── config.py             # Pydantic v2 TOML config loader & route resolver
+│   ├── translator.py         # Async LiteLLM TranslationEngine, KeyPool & rate limiter
+│   ├── file_processor.py     # Entry & per-file async processor, flowchart script ordering & context-safe cache
+│   ├── prompt_preparer.py    # Prompt builder with preprocessed raw text, glossary, flowchart & pronoun rules
+│   ├── glossary.py           # Sync/async glossary & old-translation loaders
+│   ├── unity_assets.py       # Unity 2020.3.49f1 (v22) SerializedFile & LeanLanguageCSV unpack/repack
+│   ├── story_flowchart.py    # Lua story script parser, character info & sliding dialogue context graph
+│   ├── relationship_matrix.py# Wuxia Vietnamese xưng hô (PronounRule) resolver across scripts & stages
+│   ├── utils.py              # Text pre/post-processing, JSON entry parser & shared/context-aware prompts
+│   ├── logger.py             # Lazy structured logger with safe key masking
+│   └── main.py               # Main CLI entry point (lom-translate)
+├── tool/
+│   ├── unpack_game.py                # Zero-UABEA extractor (lom-unpack-game)
+│   ├── patch_game.py                 # Zero-UABEA patch builder/installer/restorer (lom-patch-game)
+│   ├── build_story_flowchart.py      # Build story_flowchart.json from Mortal_Data (lom-build-flowchart)
+│   ├── build_relationship_matrix.py  # Build relationship_matrix.json from flowchart (lom-build-matrix)
+│   ├── create_glossary.py            # Aggregate JSON folders into JSON/TXT glossaries
+│   ├── filter_entries_by_category.py # Split files by Story / LegendInfo / Other
+│   ├── filter_languages.py           # Split files by Language field
+│   ├── convert_translation_details.py# Convert legacy dict details JSON to list format
+│   ├── translation_mapper.py         # Inspect entry-to-glossary mappings on stdout
+│   └── improve_glossary.py           # LLM-powered glossary refiner (lom-improve-glossary)
+└── tests/                    # pytest + pytest-asyncio unit test suite
 ```
 
 ## Setup
 
-1. Create a .env file from the template:
+### Prerequisites
+
+- [`uv`](https://docs.astral.sh/uv/) package manager
+- Python `>=3.11,<3.14` (`3.12` pinned via `.python-version`, provisioned automatically by `uv`)
+
+### Installation
+
+Always use `uv` and `.venv/bin/...` (never system `python` or `pip`):
+
 ```bash
+# 1. Create .venv (Python 3.12) and install runtime + dev dependencies
+uv sync --group dev
+
+# 2. Create local configuration files (both are gitignored)
 cp .env.template .env
+cp config.toml.template config.toml
 ```
 
-2. Configure your environment variables in .env:
+### Configure Secrets (`.env`)
+
+Store API keys **only** in `.env`. Every provider tier supports multiple comma-separated keys for round-robin rotation:
+
 ```env
-# API Keys (comma-separated)
-API_KEYS=your-api-key-1,your-api-key-2,your-api-key-3
+# Optional: comma-separated keys if your local OpenAI-compatible server requires auth.
+# Leave blank for keyless local servers (uses default_api_key = "local-no-key").
+LOCAL_OPENAI_API_KEYS=
 
-# Model Settings
-PRIMARY_LLM_MODEL=gemma-3-27b-it
-FALLBACK_LLM_MODELS=
+# Google Gemini (comma-separated keys per tier)
+GEMINI_FREE_API_KEYS=your-free-key-1,your-free-key-2
+GEMINI_PAID_API_KEYS=
 
-# Rate Limiting and Concurrency
-RATE_LIMIT_DELAY=2
-RATE_LIMIT_IF_QUOTA_EXCEEDED=30
-MAX_CONCURRENT=5
-MAX_CONCURRENT_FILE_OPENS=999
-MAX_GLOBAL_RETRIES=3
+# OpenRouter (comma-separated keys per tier)
+OPENROUTER_FREE_API_KEYS=
+OPENROUTER_PAID_API_KEYS=
 
-# Directory Configuration (paths are relative to project root)
-INPUT_DIR=Resource/LeanLocalJson
-OUTPUT_DIR=translated_output
-IMPROVE_DIR=improved_output
-GLOSSARY_DIR=Resource/glossary
+# Optional: custom config.toml location
+# LOM_CONFIG_FILE=config.toml
 ```
 
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
+### Configure Routing & Providers (`config.toml`)
 
-## Input File Structure
+`config.toml` organizes settings into three layers: **`Provider -> Tier & Model -> Task`**, plus `[run]` defaults:
 
-The tool expects JSON files with the following structure:
+- **`[run]`**: Default `mode`, `input_dir`, `output_dir`, `glossary_dir`, `max_concurrent_file_opens`, `dialogue_window` (default `4`), and optional `raw_dir`, `json_output_dir`, `details_output_dir`, `pairs_output_dir`, `glossary_file`, `old_dir`, `old_file`, `flowchart_file`, `relationship_file`.
+- **`[providers.<name>]`**: Connection settings (`api_base`, `timeout`, optional `default_api_key`), nested **`tiers.<tier>`** (`api_key_env`, `max_concurrent`, `rate_limit_delay`, `quota_cooldown`, `max_retries`, `model_suffix`, `extra_headers`), and nested **`models.<model>`** (`model_id`, `temperature`, `max_tokens`, `timeout`, `allowed_tiers`, `tier_model_ids`, `extra_params`).
+- **`[tasks.<task>]`**: Routing for `translate`, `improve`, and `improve_glossary` — each defines `primary = { provider, tier, model }`, ordered `fallbacks = [...]`, `max_global_retries`, and optional `temperature` / `max_tokens` overrides.
+
+Pre-configured providers in `config.toml.template`:
+
+| Provider | Endpoint / Backend | Tiers | Models |
+| --- | --- | --- | --- |
+| `local_openai` | `http://localhost:1234/v1` (LM Studio; also supports llama.cpp `:8080/v1`, vLLM `:8000/v1`) | `local` (`LOCAL_OPENAI_API_KEYS` or keyless `default_api_key`) | `qwen3-14b` (`openai/qwen3-14b`) |
+| `gemini` | Google AI Studio | `free` (`GEMINI_FREE_API_KEYS`), `paid` (`GEMINI_PAID_API_KEYS`) | `gemma-4-26b` (`gemini/gemma-4-26b-a4b-it`), `gemma-3-27b` (`gemini/gemma-3-27b-it`), `gemini-2.5-flash` (`gemini/gemini-2.5-flash`) |
+| `openrouter` | OpenRouter | `free` (`OPENROUTER_FREE_API_KEYS`, auto `:free` suffix), `paid` (`OPENROUTER_PAID_API_KEYS`) | `deepseek-v3` (`openrouter/deepseek/deepseek-chat-v3-0324`) |
+
+> Routes whose tier requires an API key (`api_key_env` set with no `default_api_key`) are automatically skipped if that environment variable is empty, allowing the engine to fall through seamlessly to the next configured route.
+
+## Input & Glossary Formats
+
+### Input JSON Files
+
+Files must have `"Language": "ChineseSimplified"` (other languages are skipped; files whose `"Language"` key appears after byte 4096 are still detected via full-file fallback parsing). Both `entries.Array` and direct `entries` list formats are supported:
 
 ```json
 {
-    "Language": "ChineseSimplified",
-    "entries": {
-        "Array": [
-            {
-                "Name": "Story/Chapter1/Dialog001",
-                "Text": "你托人送了信，自己独行下山，加紧脚步往江陵发进。"
-            },
-            {
-                "Name": "Story/Chapter1/Action001",
-                "Text": "整装"
-            }
-        ]
-    }
-}
-```
-
-Or alternatively:
-
-```json
-{
-    "Language": "ChineseSimplified",
-    "entries": [
-        {
-            "Name": "Story/Chapter1/Dialog001",
-            "Text": "你托人送了信，自己独行下山，加紧脚步往江陵发进。"
-        },
-        {
-            "Name": "Story/Chapter1/Action001",
-            "Text": "整装"
-        }
+  "Language": "ChineseSimplified",
+  "entries": {
+    "Array": [
+      {
+        "Name": "Story/Chapter1/Dialog001",
+        "Text": "你托人送了信，自己独行下山，加紧脚步往江陵发进。"
+      },
+      {
+        "Name": "Story/Chapter1/Action001",
+        "Text": "整装"
+      }
     ]
+  }
 }
 ```
 
-Key components:
-- `Language`: Must be "ChineseSimplified" (files with other languages will be skipped)
-- `entries`: Can be either an object with an "Array" field or a direct array
-- Each entry must have:
-  - `Name`: Unique identifier/path for the text
-  - `Text`: The actual Chinese text to be translated
-
-### Glossary Structure
-
-The glossary files should be JSON files with either of these formats:
-
-```json
-[
-    {
-        "Name": "UI/Button/Confirm",
-        "Original": "确认",
-        "Translated": "Xác nhận"
-    }
-]
-```
-
-Or:
+Or direct list format:
 
 ```json
 {
-    "UI/Button/Confirm": "Xác nhận"
+  "Language": "ChineseSimplified",
+  "entries": [
+    {
+      "Name": "Story/Chapter1/Dialog001",
+      "Text": "你托人送了信，自己独行下山，加紧脚步往江陵发进。"
+    }
+  ]
 }
 ```
 
-The glossary helps maintain consistent translations for frequently used terms.
+### Glossary Files
+
+Glossaries may be loaded from a specific file (`-gf` / `--glossary-file`) or all `*.json` files in `[run].glossary_dir`. Supported formats:
+
+1. **JSON list** (`Name`, `Original`, `Translated`):
+   ```json
+   [
+     {
+       "Name": "UI/Button/Confirm",
+       "Original": "确认",
+       "Translated": "Xác nhận"
+     }
+   ]
+   ```
+2. **JSON dictionary** (populates both exact-Name lookup and source-term matching):
+   ```json
+   {
+     "确认": "Xác nhận",
+     "UI/Button/Confirm": "Xác nhận"
+   }
+   ```
+3. **Plain text `.txt`** (`original=translated` per line):
+   ```text
+   确认=Xác nhận
+   整装=Chuẩn bị
+   ```
 
 ## Usage
 
+Run commands via `.venv/bin/python -m ...`, installed `.venv/bin/lom-*` console scripts, or `uv run ...`. CLI arguments override `[run]` defaults in `config.toml`.
+
+### Zero-UABEA 3-Step Localization Workflow
+
+You can unpack game text directly from *Legend of Mortal*'s `Mortal_Data/` folder, translate with story dialogue context + Vietnamese *xưng hô* rules, and build/install patches without UABEA:
+
+1. **Unpack game text, flowchart, and relationship matrix** (`Mortal_Data/` is read-only):
+   ```bash
+   .venv/bin/lom-unpack-game \
+       --mortal-data-dir /path/to/LegendOfMortal/Mortal_Data \
+       --output-json-dir Resource/LeanLocalJson \
+       --flowchart-file Resource/story_flowchart.json \
+       --relationship-file Resource/relationship_matrix.json
+   ```
+2. **Translate or improve with story context**:
+   ```bash
+   .venv/bin/lom-translate \
+       -c config.toml \
+       -m translate \
+       -id Resource/LeanLocalJson \
+       -od translated_output \
+       -ff Resource/story_flowchart.json \
+       -rf Resource/relationship_matrix.json \
+       -dw 4
+   ```
+3. **Build, install, or restore the game patch**:
+   ```bash
+   # Build standalone patch folder, install/uninstall scripts, and zip (Mortal_Data stays untouched)
+   .venv/bin/lom-patch-game \
+       --mode build \
+       --mortal-data-dir /path/to/LegendOfMortal/Mortal_Data \
+       --json-dir translated_output/json \
+       --output-patch-dir patch_output \
+       --zip
+
+   # Install directly into Mortal_Data (creates <asset>.bak backups before overwriting)
+   .venv/bin/lom-patch-game \
+       --mode install \
+       --mortal-data-dir /path/to/LegendOfMortal/Mortal_Data \
+       --json-dir translated_output/json
+
+   # Or install from an existing built patch folder
+   .venv/bin/lom-patch-game \
+       --mode install \
+       --mortal-data-dir /path/to/LegendOfMortal/Mortal_Data \
+       --patch-dir patch_output
+
+   # Restore original .bak backups
+   .venv/bin/lom-patch-game \
+       --mode restore \
+       --mortal-data-dir /path/to/LegendOfMortal/Mortal_Data
+   ```
+
 ### Translation Mode
+
 ```bash
-python src/main.py \
+.venv/bin/python -m src.main \
+    -c config.toml \
     -m translate \
     -id /path/to/input_jsons \
     -od /path/to/base_output \
-    -jod /path/to/json_output (optional, defaults to --output-dir/json) \
-    -dod /path/to/details_output (optional, defaults to --output-dir/details) \
-    -pod /path/to/pairs_output (optional, defaults to --output-dir/pairs) \
-    -gf /path/to/your_glossary.json (optional) \
-    -old /path/to/old_translations (optional, for caching old translations) \
-    -olf /path/to/single_old_translation_file.json (optional, for caching old translations from a single file)
+    -jod /path/to/json_output \
+    -dod /path/to/details_output \
+    -pod /path/to/pairs_output \
+    -gf /path/to/your_glossary.json \
+    -old /path/to/old_translations
 
-# Or using long arguments:
-python src/main.py \
+# Or with the installed console script + route overrides:
+.venv/bin/lom-translate \
     --mode translate \
     --input-dir /path/to/input_jsons \
     --output-dir /path/to/base_output \
-    --json-output-dir /path/to/json_output (optional, defaults to --output-dir/json) \
-    --details-output-dir /path/to/details_output (optional, defaults to --output-dir/details) \
-    --pairs-output-dir /path/to/pairs_output (optional, defaults to --output-dir/pairs) \
-    --glossary-file /path/to/your_glossary.json (optional) \
-    --old-dir /path/to/old_translations (optional, for caching old translations) \
-    --old-file /path/to/single_old_translation_file.json (optional, for caching old translations from a single file)
+    --provider gemini \
+    --tier free \
+    --model gemma-3-27b
 ```
 
 ### Improvement Mode
+
+Refines existing raw translations (`-rd` / `--raw-dir`) against original Chinese files (`-id` / `--input-dir`):
+
 ```bash
-python src/main.py \
+.venv/bin/python -m src.main \
+    -c config.toml \
     -m improve \
-    -i /path/to/input_jsons \
+    -id /path/to/input_jsons \
     -rd /path/to/raw_translations \
     -od /path/to/base_output \
-    -jod /path/to/json_output (optional, defaults to --output-dir/json) \
-    -dod /path/to/details_output (optional, defaults to --output-dir/details) \
-    -pod /path/to/pairs_output (optional, defaults to --output-dir/pairs) \
-    -gf /path/to/your_glossary.json (optional) \
-    -old /path/to/old_translations (optional, for caching old translations) \
-    -olf /path/to/single_old_translation_file.json (optional, for caching old translations from a single file)
+    -jod /path/to/json_output \
+    -dod /path/to/details_output \
+    -pod /path/to/pairs_output \
+    -gf /path/to/your_glossary.json \
+    -olf /path/to/single_old_translation_file.json
 
-# Or using long arguments:
-python src/main.py \
+# Or using long arguments + console script:
+.venv/bin/lom-translate \
+    --config-file config.toml \
     --mode improve \
     --input-dir /path/to/input_jsons \
     --raw-dir /path/to/raw_translations \
     --output-dir /path/to/base_output \
-    --json-output-dir /path/to/json_output (optional, defaults to --output-dir/json) \
-    --details-output-dir /path/to/details_output (optional, defaults to --output-dir/details) \
-    --pairs-output-dir /path/to/pairs_output (optional, defaults to --output-dir/pairs) \
-    --glossary-file /path/to/your_glossary.json (optional) \
-    --old-dir /path/to/old_translations (optional, for caching old translations) \
-    --old-file /path/to/single_old_translation_file.json (optional, for caching old translations from a single file)
+    --provider openrouter \
+    --tier paid \
+    --model deepseek-v3
 ```
 
-## Tool Usage
+### CLI Options (`lom-translate` / `src.main`)
 
-The `tool/` scripts provide additional utilities for processing JSON files. These scripts now require input and output directories to be specified as command-line arguments.
+| Option | Description |
+| --- | --- |
+| `-c`, `--config-file` | Path to TOML config file (default: `LOM_CONFIG_FILE` or `config.toml`) |
+| `-m`, `--mode` | `translate` or `improve` (overrides `[run].mode`) |
+| `-id`, `--input-dir` | Directory containing source JSON files (overrides `[run].input_dir`) |
+| `-od`, `--output-dir` | Base output directory (overrides `[run].output_dir`) |
+| `-rd`, `--raw-dir` | Directory of raw translations (required in `improve` mode if not set in `config.toml`) |
+| `-jod`, `--json-output-dir` | Output directory for per-file JSONs (default: `<output_dir>/json`) |
+| `-dod`, `--details-output-dir` | Output directory for `translation_details.json` (default: `<output_dir>/details`) |
+| `-pod`, `--pairs-output-dir` | Output directory for `translation_pairs.txt` (default: `<output_dir>/pairs`) |
+| `-gf`, `--glossary-file` | Path to a specific glossary `.json` or `.txt` file |
+| `-old`, `--old-dir` | Directory of previous translated JSONs for cache reuse (cannot combine with `-olf`) |
+| `-olf`, `--old-file` | Single previous translation file for cache reuse (cannot combine with `-old`) |
+| `-ff`, `--flowchart-file` | Path to `story_flowchart.json` for script-ordered `Story/` context (optional) |
+| `-rf`, `--relationship-file` | Path to `relationship_matrix.json` for character *xưng hô* rules (optional) |
+| `-dw`, `--dialogue-window` | Preceding turns in sliding dialogue context window (integer `>= 0`, default `4`) |
+| `--provider` | Override primary provider from `config.toml` (`local_openai`, `gemini`, `openrouter`, ...) |
+| `--tier` | Override primary tier from `config.toml` (`local`, `free`, `paid`, ...) |
+| `--model` | Override primary model alias from `config.toml` (`qwen3-14b`, `gemma-3-27b`, `deepseek-v3`, ...) |
 
-### 1. `create_glossary.py`
+## Utility Tools (`tool/`)
 
-Aggregates original and translated JSON files into a glossary.
+### 1. `tool/create_glossary.py`
+
+Aggregates original and translated `ChineseSimplified` JSON folders into JSON and deduplicated TXT glossaries:
 
 ```bash
-python tool/create_glossary.py --src_folder /path/to/original_jsons --tgt_folder /path/to/translated_jsons --output_json /path/to/output_glossary.json --output_txt /path/to/output_glossary.txt
+.venv/bin/python tool/create_glossary.py \
+    --src_folder /path/to/original_jsons \
+    --tgt_folder /path/to/translated_jsons \
+    --output_json /path/to/output_glossary.json \
+    --output_txt /path/to/output_glossary.txt
 ```
 
-### 2. `filter_entries_by_category.py`
+### 2. `tool/filter_entries_by_category.py`
 
-Filters JSON entries into categories (e.g., 'Story', 'LegendInfo', 'Other') based on their 'Name' field.
+Categorizes JSON files into `Story`, `LegendInfo`, and `Other` folders based on entry `Name` prefixes:
 
 ```bash
-python tool/filter_entries_by_category.py --src_folder /path/to/input_jsons --dst_base_folder /path/to/output_categorized_jsons
+.venv/bin/python tool/filter_entries_by_category.py \
+    --src_folder /path/to/input_jsons \
+    --dst_base_folder /path/to/output_categorized_jsons
 ```
 
-### 3. `filter_languages.py`
+### 3. `tool/filter_languages.py`
 
-Filters JSON files into language-specific folders based on their 'Language' field.
+Splits JSON files into per-language subdirectories based on their `Language` field:
 
 ```bash
-python tool/filter_languages.py --src_folder /path/to/input_jsons --dst_base_folder /path/to/output_language_filtered_jsons
+.venv/bin/python tool/filter_languages.py \
+    --src_folder /path/to/input_jsons \
+    --dst_base_folder /path/to/output_language_filtered_jsons
 ```
 
-### 4. `convert_translation_details.py`
+### 4. `tool/convert_translation_details.py`
 
-Converts old `translation_details.json` files (dictionary format) to the new list format.
+Converts legacy dictionary-format `translation_details.json` files to the current list format (note hyphenated flags `--input-file` / `--output-file`):
 
 ```bash
-python tool/convert_translation_details.py --input_file /path/to/old_translation_details.json --output_file /path/to/new_translation_details.json
+.venv/bin/python tool/convert_translation_details.py \
+    --input-file /path/to/old_translation_details.json \
+    --output-file /path/to/new_translation_details.json
 ```
 
-### 5. `translation_mapper.py`
+### 5. `tool/translation_mapper.py`
 
-Maps translation entries to their context, including glossary matches. This script prints the mapped data to standard output.
+Maps input entries to original text, raw translations, and glossary matches, printing results to stdout:
 
 ```bash
-python tool/translation_mapper.py
+.venv/bin/python -m tool.translation_mapper \
+    -c config.toml \
+    --input-dir /path/to/input_jsons \
+    --glossary-file /path/to/your_glossary.json
+```
+
+### 6. `tool/improve_glossary.py` (`lom-improve-glossary`)
+
+Calls the configured LLM asynchronously via the `improve_glossary` task in `config.toml` to refine glossary translations and saves an improved glossary JSON (`Name`, `Original`, `RawTranslated`, `Translated`) to `--output-dir`:
+
+```bash
+.venv/bin/python -m tool.improve_glossary \
+    -gf /path/to/your_glossary.json \
+    -od /path/to/output_dir \
+    -c config.toml \
+    --provider gemini \
+    --tier free \
+    --model gemma-3-27b
+
+# Or via the installed console script:
+.venv/bin/lom-improve-glossary \
+    --glossary-file /path/to/your_glossary.json \
+    --output-dir /path/to/output_dir
+```
+
+### 7. `tool/unpack_game.py` (`lom-unpack-game`)
+
+Extracts `ChineseSimplified` `LeanLanguageCSV` JSON files, `story_flowchart.json`, and `relationship_matrix.json` directly from `Mortal_Data/` without modifying game files:
+
+```bash
+.venv/bin/python -m tool.unpack_game \
+    --mortal-data-dir /path/to/LegendOfMortal/Mortal_Data \
+    --output-json-dir Resource/LeanLocalJson \
+    --flowchart-file Resource/story_flowchart.json \
+    --relationship-file Resource/relationship_matrix.json
+```
+
+### 8. `tool/patch_game.py` (`lom-patch-game`)
+
+Builds standalone Unity asset patches (`patch_output/Mortal_Data/*`, `install_patch.sh`, `uninstall_patch.sh`, `install_patch.bat`, `uninstall_patch.bat`, `README_PATCH.txt`, and optional `lom_vietnamese_patch.zip`), installs patches with `.bak` backups, or restores backups:
+
+```bash
+.venv/bin/lom-patch-game --mode build --mortal-data-dir /path/to/Mortal_Data --json-dir translated_output/json --output-patch-dir patch_output --zip
+.venv/bin/lom-patch-game --mode install --mortal-data-dir /path/to/Mortal_Data --patch-dir patch_output
+.venv/bin/lom-patch-game --mode restore --mortal-data-dir /path/to/Mortal_Data
+```
+
+### 9. `tool/build_story_flowchart.py` & `tool/build_relationship_matrix.py`
+
+Standalone tools (`lom-build-flowchart`, `lom-build-matrix`) to regenerate `story_flowchart.json` from `Mortal_Data/` or build/enrich `relationship_matrix.json` from a flowchart. Run `--help` to view all options:
+
+```bash
+.venv/bin/lom-build-flowchart --help
+.venv/bin/lom-build-matrix --help
 ```
 
 ## Output Structure
 
-The tool generates three types of output:
+1. **Per-File Translated JSONs** (`<output_dir>/json/`):
+   Preserves the exact input structure (`entries.Array` or direct `entries` list), written as UTF-8 (`ensure_ascii=False, indent=2`):
+   ```json
+   {
+     "Language": "ChineseSimplified",
+     "entries": {
+       "Array": [
+         {
+           "Name": "Story/Chapter1/Dialog001",
+           "Text": "Ngươi phái người đưa thư, tự mình độc hành xuống núi, thúc ngựa lao về Giang Lăng."
+         }
+       ]
+     }
+   }
+   ```
+2. **Consolidated Translation Details** (`<output_dir>/details/translation_details.json`):
+   ```json
+   [
+     {
+       "Name": "Story/Chapter1/Dialog001",
+       "Original": "你托人送了信，自己独行下山，加紧脚步往江陵发进。",
+       "Raw": "Ngươi sai người đưa thư, mình độc hành xuống núi, gấp rút bước chân hướng Giang Lăng phát tiến.",
+       "Translated": "Ngươi phái người đưa thư, tự mình độc hành xuống núi, thúc ngựa lao về Giang Lăng."
+     }
+   ]
+   ```
+   *(The `"Raw"` key is always present: populated in `improve` mode and `null` in `translate` mode.)*
+3. **Translation Pairs** (`<output_dir>/pairs/translation_pairs.txt`):
+   Deduplicated `original=translated` pairs with `\r` and `\n` escaped to literal `\r` / `\n`:
+   ```text
+   你托人送了信，自己独行下山，加紧脚步往江陵发进。=Ngươi phái người đưa thư, tự mình độc hành xuống núi, thúc ngựa lao về Giang Lăng.
+   整装=Chuẩn bị
+   ```
+4. **Logs** (`logs/translation_<timestamp>.log`):
+   Created lazily only when a translation/improvement run starts (running `--help` or importing modules does not create `logs/`). API keys are masked automatically in log output.
 
-### 1. Individual JSON Files
-Maintains the original structure with translated text:
-```json
-{
-    "Language": "ChineseSimplified",
-    "entries": {
-        "Array": [
-            {
-                "Name": "Story/Chapter1/Dialog001",
-                "Text": "Ngươi phái người đưa thư, tự mình độc hành xuống núi, thúc ngựa lao về Giang Lăng."
-            }
-        ]
-    }
-}
+## Development & Quality Checks
+
+Run lint and tests strictly inside `.venv`:
+
+```bash
+.venv/bin/ruff check .
+.venv/bin/pytest -v
 ```
 
-### 2. Translation Details (translation_details.json)
-Consolidated file containing all translations:
-```json
-[
-    {
-        "Name": "Story/Chapter1/Dialog001",
-        "Original": "你托人送了信，自己独行下山，加紧脚步往江陵发进。",
-        "Translated": "Ngươi phái người đưa thư, tự mình độc hành xuống núi, thúc ngựa lao về Giang Lăng.",
-        "Raw": "Ngươi sai người đưa thư, mình độc hành xuống núi, gấp rút bước chân hướng Giang Lăng phát tiến."
-    }
-]
-```
-Note: The "Raw" field is only present in improve mode.
-
-### 3. Translation Pairs (translation_pairs.txt)
-Simple text file with original=translation pairs:
-```text
-你托人送了信，自己独行下山，加紧脚步往江陵发进。=Ngươi phái người đưa thư, tự mình độc hành xuống núi, thúc ngựa lao về Giang Lăng.
-整装=Chuẩn bị
-```
-
-## Notes
-
-- The tool focuses on game text translation and maintains context appropriately
-- Special attention is given to short phrases and game terminology
-- Concurrent processing is used to optimize performance
-- Logging system provides detailed progress and error tracking
-- **Consistent Logging:** All logging now uses the `src/logger.py` instance for better consistency and file output.
-- **Robust API Handling:** The `src/translator.py` now includes robust API key rotation, fallback model mechanisms, and global retry logic (`MAX_GLOBAL_RETRIES`) to enhance reliability and handle rate limits or quota issues more gracefully. The `RATE_LIMIT_IF_QUOTA_EXCEEDED` has been adjusted to `30` seconds.
+Key engineering rules (see `GEMINI.md` for the full specification and improvement roadmap):
+- Always execute Python/tools via `.venv/bin/...` or `uv run` (never system `python` or `pip`).
+- Keep `.env`, `config.toml`, `logs/`, `patch_output/`, `*.bak`, and generated outputs out of git; commit only `config.toml.template` and `.env.template`.
+- Always use explicit `encoding="utf-8"` and `ensure_ascii=False`, and preserve all *Legend of Mortal* game markers (`[|]`, `[||]`, `{{0:N0}}`, `{title}`, `[{0}]`, `???`, etc.).
+- Keep `GEMINI.md` and `README.md` synchronized whenever CLI flags, config schema, tools, or architecture change.

@@ -1,40 +1,48 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
-import json
 import argparse
+import json
 from pathlib import Path
-from typing import List, Dict
 
-def convert_old_to_new_format(old_data: Dict[str, Dict[str, str]]) -> List[Dict[str, str]]:
+
+def convert_old_to_new_format(old_data: dict[str, dict[str, str]]) -> list[dict[str, str]]:
     """Converts old translation_details.json format to the new list format.
 
     Args:
-        old_data (Dict[str, Dict[str, str]]): The old translation details data.
+        old_data (dict[str, dict[str, str]]): The old translation details data.
 
     Returns:
-        List[Dict[str, str]]: The new translation details data in list format.
+        list[dict[str, str]]: The new translation details data in list format.
     """
-    new_data: List[Dict[str, str]] = []
+    new_data: list[dict[str, str]] = []
     for name, details in old_data.items():
         entry = {
-            'Name': name,
-            'Original': details.get('original', ''),
-            'Translated': details.get('final', '')
+            "Name": name,
+            "Original": details.get("original", ""),
+            "Translated": details.get("final", ""),
         }
-        if 'raw' in details:
-            entry['Raw'] = details['raw']
+        if "raw" in details:
+            entry["Raw"] = details["raw"]
         new_data.append(entry)
     return new_data
 
+
 def main():
     parser = argparse.ArgumentParser(
-        description='Convert old translation_details.json to the new list format.'
+        description="Convert old translation_details.json to the new list format."
     )
-    parser.add_argument('--input-file', type=str, required=True,
-                        help='Path to the old translation_details.json file.')
-    parser.add_argument('--output-file', type=str, required=True,
-                        help='Path for the new translation_details.json file.')
+    parser.add_argument(
+        "--input-file",
+        type=str,
+        required=True,
+        help="Path to the old translation_details.json file.",
+    )
+    parser.add_argument(
+        "--output-file",
+        type=str,
+        required=True,
+        help="Path for the new translation_details.json file.",
+    )
 
     args = parser.parse_args()
 
@@ -46,7 +54,7 @@ def main():
         return
 
     try:
-        with open(input_path, 'r', encoding='utf-8') as f:
+        with open(input_path, encoding="utf-8") as f:
             old_data = json.load(f)
     except json.JSONDecodeError as e:
         print(f"Error: Invalid JSON in input file {input_path}: {e}")
@@ -62,11 +70,12 @@ def main():
     new_data = convert_old_to_new_format(old_data)
 
     try:
-        with open(output_path, 'w', encoding='utf-8') as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             json.dump(new_data, f, ensure_ascii=False, indent=2)
         print(f"Successfully converted {input_path} to {output_path}")
     except Exception as e:
         print(f"Error writing output file {output_path}: {e}")
+
 
 if __name__ == "__main__":
     main()

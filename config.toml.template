@@ -1,0 +1,132 @@
+# Legend of Mortal (Chinese Simplified -> Vietnamese) Translator Configuration
+# Copy this file to `config.toml` and put your API keys in `.env` (see `.env.template`).
+# Every provider + tier supports comma-separated multi-key rotation via `api_key_env` in `.env`.
+
+[run]
+mode = "translate"
+input_dir = "Resource/LeanLocalJson"
+output_dir = "translated_output"
+glossary_dir = "Resource/glossary"
+max_concurrent_file_opens = 100
+
+# Optional path overrides (uncomment as needed; CLI flags override these values)
+# raw_dir = "translated_output/json"
+# json_output_dir = "translated_output/json"
+# details_output_dir = "translated_output/details"
+# pairs_output_dir = "translated_output/pairs"
+# glossary_file = "Resource/glossary/glossary.json"
+# old_dir = "old_translations"
+# old_file = "old_translations/translation_details.json"
+# flowchart_file = "Resource/story_flowchart.json"
+# relationship_file = "Resource/relationship_matrix.json"
+# dialogue_window = 4
+
+# =============================================================================
+# Providers
+# =============================================================================
+
+# --- Local OpenAI-compatible Server ---
+# Common local endpoints:
+#   LM Studio:  "http://localhost:1234/v1"
+#   llama.cpp:  "http://localhost:8080/v1"
+#   vLLM:       "http://localhost:8000/v1"
+[providers.local_openai]
+api_base = "http://localhost:1234/v1"
+timeout = 180.0
+default_api_key = "local-no-key"
+
+[providers.local_openai.tiers.local]
+api_key_env = "LOCAL_OPENAI_API_KEYS"
+max_concurrent = 2
+rate_limit_delay = 0.0
+quota_cooldown = 5.0
+max_retries = 2
+
+[providers.local_openai.models.qwen3-14b]
+model_id = "openai/qwen3-14b"
+temperature = 0.1
+max_tokens = 1500
+
+# --- Google Gemini ---
+[providers.gemini]
+timeout = 60.0
+
+[providers.gemini.tiers.free]
+api_key_env = "GEMINI_FREE_API_KEYS"
+# For a single AI Studio free key (15 RPM / 1,500 RPD), set max_concurrent=2, rate_limit_delay=4.2, quota_cooldown=60.0
+max_concurrent = 5
+rate_limit_delay = 2.0
+quota_cooldown = 30.0
+
+[providers.gemini.tiers.paid]
+api_key_env = "GEMINI_PAID_API_KEYS"
+max_concurrent = 15
+rate_limit_delay = 0.2
+quota_cooldown = 10.0
+
+[providers.gemini.models."gemma-4-26b"]
+model_id = "gemini/gemma-4-26b-a4b-it"
+temperature = 0.1
+max_tokens = 1500
+
+[providers.gemini.models.gemma-3-27b]
+model_id = "gemini/gemma-3-27b-it"
+temperature = 0.1
+max_tokens = 1500
+
+[providers.gemini.models."gemini-2.5-flash"]
+model_id = "gemini/gemini-2.5-flash"
+temperature = 0.1
+max_tokens = 1500
+
+# --- OpenRouter ---
+[providers.openrouter]
+timeout = 90.0
+
+[providers.openrouter.tiers.free]
+api_key_env = "OPENROUTER_FREE_API_KEYS"
+max_concurrent = 3
+rate_limit_delay = 2.0
+quota_cooldown = 30.0
+model_suffix = ":free"
+
+[providers.openrouter.tiers.paid]
+api_key_env = "OPENROUTER_PAID_API_KEYS"
+max_concurrent = 10
+rate_limit_delay = 0.2
+quota_cooldown = 10.0
+
+[providers.openrouter.models.deepseek-v3]
+model_id = "openrouter/deepseek/deepseek-chat-v3-0324"
+temperature = 0.1
+max_tokens = 1500
+
+# =============================================================================
+# Task Routing (local-first with Gemini and OpenRouter fallbacks)
+# =============================================================================
+
+[tasks.translate]
+primary = { provider = "local_openai", tier = "local", model = "qwen3-14b" }
+fallbacks = [
+    { provider = "gemini", tier = "free", model = "gemma-3-27b" },
+    { provider = "gemini", tier = "free", model = "gemini-2.5-flash" },
+    { provider = "openrouter", tier = "free", model = "deepseek-v3" },
+]
+max_global_retries = 3
+
+[tasks.improve]
+primary = { provider = "local_openai", tier = "local", model = "qwen3-14b" }
+fallbacks = [
+    { provider = "gemini", tier = "free", model = "gemini-2.5-flash" },
+    { provider = "gemini", tier = "free", model = "gemma-3-27b" },
+    { provider = "openrouter", tier = "free", model = "deepseek-v3" },
+]
+max_global_retries = 3
+
+[tasks.improve_glossary]
+primary = { provider = "local_openai", tier = "local", model = "qwen3-14b" }
+fallbacks = [
+    { provider = "gemini", tier = "free", model = "gemini-2.5-flash" },
+    { provider = "openrouter", tier = "free", model = "deepseek-v3" },
+]
+max_global_retries = 3

@@ -1,193 +1,155 @@
 import json
-import aiofiles
 from pathlib import Path
-from src.config import GLOSSARY_DIR
+from typing import Any
+
+import aiofiles
+
 from src.logger import logger
+from src.utils import parse_json_entries
 
 
-async def load_glossary_async(glossary_file_path=None):
+def _resolve_glossary_files(
+    glossary_file_path: str | Path | None,
+    glossary_dir: str | Path,
+) -> list[Path]:
+    """Resolve the list of glossary files to load."""
+    if glossary_file_path:
+        file_path = Path(glossary_file_path)
+        if not file_path.exists():
+            raise FileNotFoundError(f"Glossary file not found: {glossary_file_path}")
+        return [file_path]
+
+    glossary_path = Path(glossary_dir)
+    if not glossary_path.exists():
+        logger.warning(f"Glossary directory not found: {glossary_dir}")
+        return []
+
+    files = sorted(glossary_path.glob("*.json"))
+    if not files:
+        logger.warning(f"No glossary files found in {glossary_dir}")
+    return files
+
+
+def _parse_glossary_content(
+    content: str,
+    suffix: str,
+    name_to_translated: dict[str, str],
+    original_to_translated: dict[str, str],
+) -> None:
+    """Parse glossary file content (.json or .txt) into lookup dictionaries."""
+    ext = suffix.lower()
+    if ext == ".json":
+        data = json.loads(content)
+        if isinstance(data, list):
+            for entry in data:
+                if not isinstance(entry, dict):
+                    continue
+                name = str(entry.get("Name") or "").strip()
+                original = str(entry.get("Original") or "").strip()
+                translated = str(entry.get("Translated") or "").strip()
+                if name and translated:
+                    name_to_translated[name] = translated
+                if original and translated:
+                    original_to_translated[original] = translated
+        elif isinstance(data, dict):
+            for key, value in data.items():
+                k = str(key).strip() if key is not None else ""
+                v = str(value).strip() if value is not None else ""
+                if k and v:
+                    name_to_translated[k] = v
+                    original_to_translated[k] = v
+    elif ext == ".txt":
+        for line in content.splitlines():
+            stripped = line.strip()
+            if "=" in stripped:
+                original, translated = stripped.split("=", 1)
+                original = original.strip()
+                translated = translated.strip()
+                if original and translated:
+                    original_to_translated[original] = translated
+                    name_to_translated[original] = translated
+
+
+def _extract_old_pairs(
+    original_data: dict[str, Any],
+    translated_data: dict[str, Any],
+) -> dict[str, str]:
+    """Extract original_text -> translated_text pairs from aligned JSON files."""
+    o_entries, _ = parse_json_entries(original_data)
+    t_entries, _ = parse_json_entries(translated_data)
+
+    t_map: dict[str, str] = {}
+    for entry in t_entries:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("key") or entry.get("Name")
+        if name:
+            t_map[str(name)] = str(entry.get("value") or entry.get("Text") or "")
+
+    pairs: dict[str, str] = {}
+    for o_entry in o_entries:
+        if not isinstance(o_entry, dict):
+            continue
+        name = o_entry.get("key") or o_entry.get("Name")
+        original_text = str(o_entry.get("value") or o_entry.get("Text") or "").strip()
+        if name and str(name) in t_map:
+            translated_text = t_map[str(name)].strip()
+            if original_text and translated_text:
+                pairs[original_text] = translated_text
+
+    return pairs
+
+
+async def load_glossary_async(
+    glossary_file_path: str | Path | None = None,
+    glossary_dir: str | Path = "Resource/glossary",
+) -> tuple[dict[str, str], dict[str, str]]:
     """Asynchronously load glossary data from JSON or TXT files."""
-    name_to_translated = {}
-    original_to_translated = {}
-    files_to_process = []
+    name_to_translated: dict[str, str] = {}
+    original_to_translated: dict[str, str] = {}
 
-    if glossary_file_path:
-        file_path = Path(glossary_file_path)
-        if not file_path.exists():
-            raise FileNotFoundError(f"Glossary file not found: {glossary_file_path}")
-        files_to_process.append(file_path)
-    else:
-        glossary_path = Path(GLOSSARY_DIR)
-        if glossary_path.exists():
-            files_to_process.extend(list(glossary_path.glob("*.json")))
-        else:
-            logger.warning(f"Glossary directory not found: {GLOSSARY_DIR}")
-
-    if not files_to_process:
-        logger.warning(f"No glossary files found in {GLOSSARY_DIR}")
-        return name_to_translated, original_to_translated
-
+    files_to_process = _resolve_glossary_files(glossary_file_path, glossary_dir)
     for file in files_to_process:
         try:
-            async with aiofiles.open(file, "r", encoding="utf-8") as f:
+            async with aiofiles.open(file, encoding="utf-8") as f:
                 content = await f.read()
-                if file.suffix == ".json":
-                    data = json.loads(content)
-                    if isinstance(data, list):
-                        for entry in data:
-                            name = entry.get("Name", "").strip()
-                            original = entry.get("Original", "").strip()
-                            translated = entry.get("Translated", "").strip()
-                            if name and translated:
-                                name_to_translated[name] = translated
-                            if original and translated:
-                                original_to_translated[original] = translated
-                    elif isinstance(data, dict):
-                        for k, v in data.items():
-                            if k.strip() and str(v).strip():
-                                name_to_translated[k.strip()] = str(v).strip()
-                elif file.suffix == ".txt":
-                    for line in content.splitlines():
-                        if "=" in line:
-                            original, translated = line.split("=", 1)
-                            original, translated = original.strip(), translated.strip()
-                            if original and translated:
-                                original_to_translated[original] = translated
-                                name_to_translated[original] = translated
+            _parse_glossary_content(content, file.suffix, name_to_translated, original_to_translated)
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in glossary file {file}: {e}")
         except Exception as e:
-            logger.error(f"Failed to process glossary file {file}: {str(e)}")
+            logger.error(f"Failed to process glossary file {file}: {e}")
+
     return name_to_translated, original_to_translated
 
 
-async def load_old_translations_async(input_dir, translated_dir):
-    """Asynchronously load old translations by comparing input and translated directories."""
-    old_translations_map = {}
-    input_path = Path(input_dir)
-    translated_path = Path(translated_dir)
+def load_glossary(
+    glossary_file_path: str | Path | None = None,
+    glossary_dir: str | Path = "Resource/glossary",
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Load glossary data from JSON or TXT files."""
+    name_to_translated: dict[str, str] = {}
+    original_to_translated: dict[str, str] = {}
 
-    if not translated_path.exists():
-        logger.warning(f"Translated directory not found: {translated_dir}")
-        return old_translations_map
-
-    def _parse_entries(data):
-        entries = data.get("entries", [])
-        return (
-            entries["Array"]
-            if isinstance(entries, dict) and "Array" in entries
-            else (entries if isinstance(entries, list) else [])
-        )
-
-    for t_file in translated_path.glob("*.json"):
-        o_file = input_path / t_file.name
-        if not o_file.exists():
-            continue
-        try:
-            async with aiofiles.open(o_file, "r", encoding="utf-8") as f:
-                o_data = json.loads(await f.read())
-            async with aiofiles.open(t_file, "r", encoding="utf-8") as f:
-                t_data = json.loads(await f.read())
-
-            o_entries, t_entries = _parse_entries(o_data), _parse_entries(t_data)
-            t_map = {
-                (e.get("key") or e.get("Name")): (e.get("value") or e.get("Text", ""))
-                for e in t_entries
-            }
-
-            for o_entry in o_entries:
-                name = o_entry.get("key") or o_entry.get("Name")
-                original_text = (
-                    o_entry.get("value") or o_entry.get("Text", "")
-                ).strip()
-                if name in t_map:
-                    translated_text = t_map[name].strip()
-                    if original_text and translated_text:
-                        old_translations_map[original_text] = translated_text
-        except Exception as e:
-            logger.error(
-                f"Failed to process old translation file pair ({o_file.name}, {t_file.name}): {e}"
-            )
-    return old_translations_map
-
-
-def load_glossary(glossary_file_path=None):
-    """Load glossary data from JSON or TXT files.
-
-    Args:
-        glossary_file_path (str, optional): Absolute path to a specific glossary file (.json or .txt).
-
-    Returns:
-        Tuple of (name_to_translated, original_to_translated) dictionaries
-
-    Raises:
-        FileNotFoundError: If a specified glossary file is not found.
-        json.JSONDecodeError: If a glossary JSON file is invalid.
-    """
-    name_to_translated = {}
-    original_to_translated = {}
-
-    files_to_process = []
-
-    if glossary_file_path:
-        file_path = Path(glossary_file_path)
-        if not file_path.exists():
-            raise FileNotFoundError(f"Glossary file not found: {glossary_file_path}")
-        files_to_process.append(file_path)
-    else:
-        glossary_path = Path(GLOSSARY_DIR)
-        if not glossary_path.exists():
-            logger.warning(f"Glossary directory not found: {GLOSSARY_DIR}")
-            return name_to_translated, original_to_translated
-        files_to_process.extend(list(glossary_path.glob("*.json")))
-        if not files_to_process:
-            logger.warning(f"No glossary files found in {GLOSSARY_DIR}")
-            return name_to_translated, original_to_translated
-
+    files_to_process = _resolve_glossary_files(glossary_file_path, glossary_dir)
     for file in files_to_process:
         try:
-            if file.suffix == ".json":
-                with open(file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-
-                if isinstance(data, list):
-                    for entry in data:
-                        name = entry.get("Name", "").strip()
-                        original = entry.get("Original", "").strip()
-                        translated = entry.get("Translated", "").strip()
-
-                        if name and translated:
-                            name_to_translated[name] = translated
-                        if original and translated:
-                            original_to_translated[original] = translated
-
-                elif isinstance(data, dict):
-                    # fallback for dict format
-                    for k, v in data.items():
-                        if k.strip() and str(v).strip():
-                            name_to_translated[k.strip()] = str(v).strip()
-
-            elif file.suffix == ".txt":
-                with open(file, "r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if "=" in line:
-                            original, translated = line.split("=", 1)
-                            original = original.strip()
-                            translated = translated.strip()
-                            if original and translated:
-                                original_to_translated[original] = translated
-                                # For TXT, we don't have a 'Name' field, so we'll use original for name_to_translated if needed
-                                name_to_translated[original] = translated
-
+            with open(file, encoding="utf-8") as f:
+                content = f.read()
+            _parse_glossary_content(content, file.suffix, name_to_translated, original_to_translated)
         except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in glossary file {file}: {str(e)}")
+            logger.error(f"Invalid JSON in glossary file {file}: {e}")
         except Exception as e:
-            logger.error(f"Failed to process glossary file {file}: {str(e)}")
+            logger.error(f"Failed to process glossary file {file}: {e}")
+
     return name_to_translated, original_to_translated
 
 
-def load_old_translations(input_dir, translated_dir):
-    """Load old translations by comparing input and translated directories."""
-    old_translations_map = {}
+async def load_old_translations_async(
+    input_dir: str | Path,
+    translated_dir: str | Path,
+) -> dict[str, str]:
+    """Asynchronously load old translations by comparing input and translated directories."""
+    old_translations_map: dict[str, str] = {}
     input_path = Path(input_dir)
     translated_path = Path(translated_dir)
 
@@ -195,40 +157,16 @@ def load_old_translations(input_dir, translated_dir):
         logger.warning(f"Translated directory not found: {translated_dir}")
         return old_translations_map
 
-    def _parse_entries(data):
-        entries = data.get("entries", [])
-        if isinstance(entries, dict) and "Array" in entries:
-            return entries["Array"]
-        return entries if isinstance(entries, list) else []
-
-    for t_file in translated_path.glob("*.json"):
+    for t_file in sorted(translated_path.glob("*.json")):
         o_file = input_path / t_file.name
         if not o_file.exists():
             continue
-
         try:
-            with open(o_file, "r", encoding="utf-8") as f:
-                o_data = json.load(f)
-            with open(t_file, "r", encoding="utf-8") as f:
-                t_data = json.load(f)
-
-            o_entries = _parse_entries(o_data)
-            t_entries = _parse_entries(t_data)
-
-            t_map = {
-                (e.get("key") or e.get("Name")): (e.get("value") or e.get("Text", ""))
-                for e in t_entries
-            }
-
-            for o_entry in o_entries:
-                name = o_entry.get("key") or o_entry.get("Name")
-                original_text = (
-                    o_entry.get("value") or o_entry.get("Text", "")
-                ).strip()
-                if name in t_map:
-                    translated_text = t_map[name].strip()
-                    if original_text and translated_text:
-                        old_translations_map[original_text] = translated_text
+            async with aiofiles.open(o_file, encoding="utf-8") as f:
+                o_data = json.loads(await f.read())
+            async with aiofiles.open(t_file, encoding="utf-8") as f:
+                t_data = json.loads(await f.read())
+            old_translations_map.update(_extract_old_pairs(o_data, t_data))
         except json.JSONDecodeError as e:
             logger.error(
                 f"Invalid JSON in old translation file pair ({o_file.name}, {t_file.name}): {e}"
@@ -241,20 +179,50 @@ def load_old_translations(input_dir, translated_dir):
     return old_translations_map
 
 
-def get_translated_by_name(name, name_to_translated):
+def load_old_translations(
+    input_dir: str | Path,
+    translated_dir: str | Path,
+) -> dict[str, str]:
+    """Load old translations by comparing input and translated directories."""
+    old_translations_map: dict[str, str] = {}
+    input_path = Path(input_dir)
+    translated_path = Path(translated_dir)
+
+    if not translated_path.exists():
+        logger.warning(f"Translated directory not found: {translated_dir}")
+        return old_translations_map
+
+    for t_file in sorted(translated_path.glob("*.json")):
+        o_file = input_path / t_file.name
+        if not o_file.exists():
+            continue
+        try:
+            with open(o_file, encoding="utf-8") as f:
+                o_data = json.load(f)
+            with open(t_file, encoding="utf-8") as f:
+                t_data = json.load(f)
+            old_translations_map.update(_extract_old_pairs(o_data, t_data))
+        except json.JSONDecodeError as e:
+            logger.error(
+                f"Invalid JSON in old translation file pair ({o_file.name}, {t_file.name}): {e}"
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to process old translation file pair ({o_file.name}, {t_file.name}): {e}"
+            )
+
+    return old_translations_map
+
+
+def get_translated_by_name(name: str, name_to_translated: dict[str, str]) -> str | None:
     return name_to_translated.get(name)
 
 
-def find_original_matches(text, original_to_translated):
-    """Find all glossary terms that appear in the given text
-
-    Args:
-        text: The text to search in
-        original_to_translated: Dictionary mapping original terms to translations
-
-    Returns:
-        List of (original, translation) tuples for matches found
-    """
+def find_original_matches(
+    text: str,
+    original_to_translated: dict[str, str] | None,
+) -> list[tuple[str, str]]:
+    """Find all glossary terms that appear in the given text (longest matches first)."""
     if not text or not original_to_translated:
         return []
 
@@ -263,6 +231,4 @@ def find_original_matches(text, original_to_translated):
         for orig, trans in original_to_translated.items()
         if orig and orig in text
     ]
-    return sorted(
-        matches, key=lambda x: len(x[0]), reverse=True
-    )  # Longest matches first
+    return sorted(matches, key=lambda item: len(item[0]), reverse=True)

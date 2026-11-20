@@ -1,8 +1,11 @@
-def preprocess_text(text):
+from typing import Any
+
+
+def preprocess_text(text: str) -> str:
     return text.strip().replace("\r", "[|]").replace("\n", "[||]")
 
 
-def postprocess_text(text, for_json=True):
+def postprocess_text(text: str, for_json: bool = True) -> str:
     text = (
         text.strip()
         .replace("[|]", "\r")
@@ -15,12 +18,31 @@ def postprocess_text(text, for_json=True):
     if for_json:
         # Keep real \r and \n characters
         return text.replace("\\r", "\r").replace("\\n", "\n")
-    else:
-        # Store as literal \\r and \\n for txt
-        return text.replace("\r", "\\r").replace("\n", "\\n")
+    # Store as literal \\r and \\n for txt
+    return text.replace("\r", "\\r").replace("\n", "\\n")
 
 
-SPECIAL_CHARS = [
+def parse_json_entries(data: dict[str, Any]) -> tuple[list[dict[str, Any]], bool]:
+    """Extract entry list and format flag from supported JSON schemas.
+
+    Supports both ``{"entries": {"Array": [...]}}`` (``is_array_format=True``)
+    and ``{"entries": [...]}`` (``is_array_format=False``). Returns ``([], False)``
+    when ``entries`` is missing or invalid.
+    """
+    if not isinstance(data, dict):
+        return [], False
+    entries = data.get("entries")
+    if isinstance(entries, dict):
+        array = entries.get("Array")
+        if isinstance(array, list):
+            return array, True
+        return [], False
+    if isinstance(entries, list):
+        return entries, False
+    return [], False
+
+
+SPECIAL_CHARS: list[str] = [
     "？？？",
     "{{title}}",
     "???",
@@ -31,6 +53,7 @@ SPECIAL_CHARS = [
     "……。",
     "……！",
 ]
+
 START_PROMPT = "Bạn là một chuyên gia dịch thuật từ Tiếng Trung (Giản thể) sang Tiếng Việt và đã có kinh nghiệm bản địa hóa các tựa game từ các thứ tiếng sang Tiếng Việt."
 
 RULES_PROMPT = """
@@ -51,8 +74,52 @@ Ví dụ:
 8. Khi phân vân không biết dịch sao, bạn cứ trả về văn bản mà bạn cho đúng nhất.
 """
 
+IMPROVE_RULE_PROMPT = (
+    "9. Sử dụng bản dịch thô để THAM KHẢO về xưng hô cũng như mối quan hệ giữa các nhân vật."
+)
+
+CONTEXT_AWARE_IMPROVE_RULE_PROMPT = (
+    "9. Ưu tiên tuyệt đối Ngữ cảnh cốt truyện và Quy tắc xưng hô (Relationship Matrix) được cung cấp ở trên để dịch đúng xưng hô, vai vế và cảm xúc nhân vật; chỉ dùng bản dịch thô để tham khảo ý nghĩa và PHẢI sửa lại xưng hô nếu bản dịch thô bị sai."
+)
+
 STORY_CONTEXT_PROMPT = """
 Bối cảnh câu chuyện: Legend of Mortal là câu chuyện bối cảnh kiếm hiệp cổ trang diễn ra vào triều Tống tại Trung Quốc đang dần suy yếu.
 Nhân vật chính là Triệu Hoạt - Đệ tử ngoại thất của Đường Môn. Triệu Hoạt là một con người không có gì - xuất thân mơ hồ, nhan sắc xấu xí, võ công yếu kém
 Nhưng đến cuối cùng, số mệnh Đường Môn, hoặc cả võ lâm giang hồ cùng nhà Tống nằm trong tay Triệu Hoạt.
 """
+
+
+def build_translation_prompt(
+    original_text: str,
+    raw_translation: str | None = None,
+    glossary_matches: list[tuple[str, str]] | None = None,
+    story_context: str | None = None,
+) -> str:
+    """Build a translation or improvement prompt for Legend of Mortal game text."""
+    normalized_context = story_context.strip() if isinstance(story_context, str) else ""
+    header = f"{START_PROMPT}\n{STORY_CONTEXT_PROMPT}\n{RULES_PROMPT.rstrip()}"
+    if raw_translation:
+        improve_rule = (
+            CONTEXT_AWARE_IMPROVE_RULE_PROMPT if normalized_context else IMPROVE_RULE_PROMPT
+        )
+        header = f"{header}\n{improve_rule}"
+
+    sections: list[str] = [header]
+
+    if normalized_context:
+        sections.append(
+            f"Thông tin ngữ cảnh & xưng hô trong cảnh hiện tại:\n{normalized_context}"
+        )
+
+    if glossary_matches:
+        glossary_lines = ["Một số thuật ngữ/cụm từ cần giữ nguyên:"]
+        for orig, trans in glossary_matches:
+            glossary_lines.append(f"- {orig}={trans}")
+        sections.append("\n".join(glossary_lines))
+
+    sections.append(f"Văn bản cần được dịch:\n{original_text}")
+
+    if raw_translation:
+        sections.append(f"Bản dịch thô để tham khảo:\n{raw_translation}")
+
+    return "\n\n".join(sections)

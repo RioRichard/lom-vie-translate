@@ -1,16 +1,20 @@
-# Python
-__pycache__/
+# Virtual Environments
+.venv/
 *venv/
 ENV/
 env/
 env.bak/
 venv.bak/
+pyvenv.cfg
+
+# Secrets & Local Configuration
 .env
-bin/
-lib64/
-lib64
-include/
-pyvenv.cfg$py.class
+config.toml
+
+# Python Caches & Build Artifacts
+__pycache__/
+*.py[cod]
+*$py.class
 *.so
 .Python
 build/
@@ -28,18 +32,11 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+*.spec
 
-# Virtual Environment
-venv/
-ENV/
-env/
-env.bak/
-venv.bak/
-.env
-bin/
-lib64/**
-include/
-pyvenv.cfg
+# Test & Lint Caches
+.pytest_cache/
+.ruff_cache/
 
 # IDE
 .idea/
@@ -47,18 +44,25 @@ pyvenv.cfg
 *.swp
 *.swo
 
-# Project specific
-testcase/
-Resource/
-old_code/
+# Project Outputs & Local Data
 logs/
+translated_output/
+improved_output/
 translated_output_json/
-.pytest_cache/
-.ruff_cache/
+patch_output/
+*.bak
+Resource/
+testcase/
+old_code/
 
-# Allow
+# Explicitly Allowed Project Files
 !src/
-!requirements.txt
+!tool/
+!tests/
+!pyproject.toml
+!GEMINI.md
 !README.md
 !.gitignore
 !.env.template
+!config.toml.template
+!.python-version
