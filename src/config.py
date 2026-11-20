@@ -6,7 +6,7 @@ from typing import Any, Literal, Self
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, model_validator
 
-VALID_MODES: tuple[str, ...] = ("translate", "improve")
+VALID_MODES: tuple[str, ...] = ("translate", "improve", "glossary")
 DEFAULT_CONFIG_FILENAME = "config.toml"
 
 
@@ -53,7 +53,7 @@ class TaskConfig(BaseModel):
 
 
 class RunConfig(BaseModel):
-    mode: Literal["translate", "improve"] = "translate"
+    mode: Literal["translate", "improve", "glossary"] = "translate"
     input_dir: str = "Resource/LeanLocalJson"
     output_dir: str = "translated_output"
     raw_dir: str | None = None
@@ -62,6 +62,7 @@ class RunConfig(BaseModel):
     pairs_output_dir: str | None = None
     glossary_dir: str = "Resource/glossary"
     glossary_file: str | None = None
+    auto_sync_glossary: bool = True
     old_dir: str | None = None
     old_file: str | None = None
     flowchart_file: str | None = None

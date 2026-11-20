@@ -66,13 +66,13 @@ Every developer and AI agent working in this repository MUST follow these rules 
 │   ├── translator.py         # Async LiteLLM TranslationEngine, KeyPool round-robin rotation, per-tier _TierLimiter, fallback/retry loop
 │   ├── file_processor.py     # Entry & per-file async processing, context-safe caching, flowchart script ordering + sliding dialogue window
 │   ├── prompt_preparer.py    # Per-file prompt builder with raw-translation preprocessing, glossary, flowchart & pronoun-rule injection
-│   ├── glossary.py           # Sync/async glossary & old-translation loaders (JSON list, JSON dict, TXT), longest-match term search
+│   ├── glossary.py           # Sync/async glossary & old-translation loaders, structured candidate extraction, 3-way autocheck_and_sync_glossary
 │   ├── unity_assets.py       # Unity 2020.3.49f1 (v22) SerializedFile & LeanLanguageCSV parser/repacker (extract, patch, install, restore)
-│   ├── story_flowchart.py    # Lua story script parser, character info & StoryFlowchart sliding dialogue context graph
-│   ├── relationship_matrix.py# Wuxia Vietnamese xưng hô (PronounRule) resolver across story scripts & relationship stages
+│   ├── story_flowchart.py    # Lua story script parser, character info, StoryFlowchart sliding context & glossary vi_name sync
+│   ├── relationship_matrix.py# Wuxia Vietnamese xưng hô (PronounRule) resolver & character vi_name sync
 │   ├── utils.py              # preprocess_text, postprocess_text, SPECIAL_CHARS, parse_json_entries, shared & context-aware prompt builders
 │   ├── logger.py             # TranslationLogger singleton, lazy file logging (enable_file_logging), safe key masking, run summary
-│   └── main.py               # CLI entry point (lom-translate), TOML+CLI merge, async producer-consumer file pipeline, output writers
+│   └── main.py               # CLI entry point (lom-translate), -m translate/improve/glossary, pre-flight glossary sync, async file pipeline
 ├── tool/
 │   ├── __init__.py
 │   ├── unpack_game.py                # Zero-UABEA unpacker: extract LeanLocal JSONs + story_flowchart.json + relationship_matrix.json
@@ -103,10 +103,11 @@ All runtime behavior is configured in a single `config.toml` (copied from `confi
 ### Schema Overview
 
 1. **`[run]`** (`RunConfig`):
-   - `mode`: `"translate"` or `"improve"` (default `"translate"`)
+   - `mode`: `"translate"`, `"improve"`, or `"glossary"` (default `"translate"`)
    - `input_dir`: default `"Resource/LeanLocalJson"`
    - `output_dir`: default `"translated_output"`
    - `glossary_dir`: default `"Resource/glossary"`
+   - `auto_sync_glossary`: `bool` (default `true` — automatically runs pre-flight glossary check & sync before `translate`/`improve` runs unless `--no-auto-glossary` is passed)
    - `max_concurrent_file_opens`: int `>= 1` (default `100`)
    - `dialogue_window`: int `>= 0` (default `4`, preceding dialogue turns injected for `Story/` lines when a flowchart is loaded)
    - Optional path fields (commented in template, overridable via CLI): `raw_dir`, `json_output_dir`, `details_output_dir`, `pairs_output_dir`, `glossary_file`, `old_dir`, `old_file`, `flowchart_file`, `relationship_file`
@@ -181,11 +182,25 @@ OPENROUTER_PAID_API_KEYS=
 
 ## Architecture & Data Flow
 
+### Pre-Flight Glossary Auto-Check & Sync (`autocheck_and_sync_glossary`)
+
+Active automatically before `translate`/`improve` runs when `[run].auto_sync_glossary = true` (default) and `--no-auto-glossary` is not passed, or standalone via `-m glossary`:
+
+1. **Structured Candidate Extraction** (`extract_game_glossary_candidates`): Scans `ChineseSimplified` JSONs in `input_dir` (and `flowchart.characters`) across 4 categories — `characters`, `martial_arts`, `locations`, `items_lore` — attaching paired context (`CharacterIntro0..4`, `Desc`, `Position/desc`, `Facility/Effect`, companion titles/names, flowchart gender/aliases), while skipping `SPECIAL_CHARS`, `ANONYMOUS_CHARACTER_NAMES` (`？？？`, `???`, `蒙面人`, etc.), `{title}` placeholders, and pure numbers/punctuation.
+2. **3-Way Glossary Sync** against target `glossary_file` (or `<glossary_dir>/glossary.json` + `.txt`; created automatically if missing on disk):
+   - **Outdated check**: Existing `Name` whose `Original` Chinese text changed is invalidated and re-translated.
+   - **In-sync & deterministic reuse**: Matching entries (plus manual/custom entries) are preserved with 0 LLM calls; duplicates and curated characters (`CURATED_CHARACTERS`, guarding anonymous/variant IDs) are reused deterministically.
+   - **Missing/outdated LLM translation**: Characters translate first (Wave 1) so compound martial arts/items (Wave 2) receive consistent sub-term glossary matches via `build_glossary_term_prompt`; failed/empty LLM results (`succeeded=False`) never poison the glossary.
+3. **Persistence & Character Sync**: Writes UTF-8 JSON list (`ensure_ascii=False`) + deduplicated escaped TXT (`original=translated`), and calls `sync_characters_from_glossary` and `sync_matrix_characters` to update `vi_name` in `story_flowchart.json` and `relationship_matrix.json`. In `mode == "glossary"`, uses task `improve_glossary` (falling back to `translate`), skips creating `output_dir/(json, details, pairs)`, logs sync stats, and exits before the file pipeline.
+
 ### Async Producer-Consumer Pipeline
 
 ```text
 input_dir/*.json
    │
+   ▼  Pre-Flight Glossary Auto-Check & Sync (when mode=="glossary" or auto_sync_glossary && !--no-auto-glossary)
+   │  - Extracts 4 categories + paired context, runs 3-way check, writes glossary.json/.txt, syncs flowchart & matrix
+   │  - Exits cleanly here if mode == "glossary" (without creating output_dir/(json, details, pairs))
    ▼  file_producer (bounded by max_concurrent_file_opens)
    │  - Reads first 4096 bytes for fast "Language": "ChineseSimplified" check
    │  - Fast-skips if another "Language" value is found in first 4096 bytes
@@ -204,7 +219,7 @@ process_entry (3-Tier Context-Safe Cache/Reuse + LLM Fallback)
    │  0. Short-circuit empty text or SPECIAL_CHARS verbatim
    │  1. Glossary exact match (by stripped original text via original_to_translated)
    │  2. In-run deduplication: story-contextual entries check per-file contextual_pairs (`{Name}::{Original}`) and never collide on bare `original_text`; non-contextual entries use shared `translation_pairs` (raw unescaped text; ONLY successful translations stored)
-   │  3. Old translations cache (--old-dir or --old-file, matched by stripped original text)
+   │  3. Optional old translations cache (--old-dir or --old-file, matched by stripped original text)
    │  4. TranslationEngine.translate_text(...) via litellm.acompletion (uses CONTEXT_AWARE_IMPROVE_RULE_PROMPT when both story_context and raw_translation are set)
    ▼
 Outputs
@@ -281,8 +296,18 @@ The repository supports direct extraction from and patching into *Legend of Mort
        --flowchart-file Resource/story_flowchart.json \
        --relationship-file Resource/relationship_matrix.json
    ```
-2. **Step 2 — Translate or improve with story context & *xưng hô* rules**:
+2. **Step 2 — Check/sync glossary (automatic or standalone) and translate or improve with story context & *xưng hô* rules**:
    ```bash
+   # Optional standalone glossary check & sync (creates/updates glossary.json + .txt and syncs character vi_name)
+   .venv/bin/lom-translate \
+       -c config.toml \
+       -m glossary \
+       -id Resource/LeanLocalJson \
+       -gf Resource/glossary/glossary.json \
+       -ff Resource/story_flowchart.json \
+       -rf Resource/relationship_matrix.json
+
+   # Translate (automatically runs pre-flight glossary auto-check & sync when auto_sync_glossary = true; pass --no-auto-glossary to skip)
    .venv/bin/lom-translate \
        -c config.toml \
        -m translate \
@@ -320,11 +345,27 @@ The repository supports direct extraction from and patching into *Legend of Mort
        --mortal-data-dir /path/to/LegendOfMortal/Mortal_Data
    ```
 
-### 3. Main CLI (`translate` & `improve` Modes)
+### 3. Main CLI (`translate`, `improve` & `glossary` Modes)
 
 Can be invoked via `.venv/bin/python -m src.main`, `.venv/bin/lom-translate`, or `uv run lom-translate`. Any omitted path/mode option falls back to `[run]` in `config.toml`.
 
+#### Glossary Check & Sync Mode (`-m glossary`)
+
+Extracts structured candidates (`characters`, `martial_arts`, `locations`, `items_lore`) directly from `ChineseSimplified` JSONs in `-id` / `--input-dir` (no `--old-dir` or pre-translated folder required), creates/updates the target glossary JSON + TXT (even if `-gf` does not exist yet on disk), syncs `vi_name` into `story_flowchart.json` and `relationship_matrix.json`, and exits without creating `output_dir/(json, details, pairs)`. Resolves LLM routes using `improve_glossary` (falling back to `translate` if omitted):
+
+```bash
+.venv/bin/lom-translate \
+    -c config.toml \
+    -m glossary \
+    -id Resource/LeanLocalJson \
+    -gf Resource/glossary/glossary.json \
+    -ff Resource/story_flowchart.json \
+    -rf Resource/relationship_matrix.json
+```
+
 #### Translation Mode
+
+Pre-flight glossary auto-check & sync runs automatically before file translation when `[run].auto_sync_glossary = true` (default). Pass `--no-auto-glossary` to skip pre-flight sync and load existing glossaries as-is. (`-old` / `--old-dir` is only for optional previous-translation cache reuse, not required for glossary creation/sync.)
 
 ```bash
 .venv/bin/python -m src.main \
@@ -335,14 +376,14 @@ Can be invoked via `.venv/bin/python -m src.main`, `.venv/bin/lom-translate`, or
     -jod /path/to/json_output \
     -dod /path/to/details_output \
     -pod /path/to/pairs_output \
-    -gf /path/to/your_glossary.json \
-    -old /path/to/old_translations
+    -gf /path/to/your_glossary.json
 
-# Equivalent console script with runtime route override (e.g. switch to Gemini free tier):
+# Equivalent console script with runtime route override & pre-flight sync disabled:
 .venv/bin/lom-translate \
     --mode translate \
     --input-dir /path/to/input_jsons \
     --output-dir /path/to/base_output \
+    --no-auto-glossary \
     --provider gemini \
     --tier free \
     --model gemma-3-27b
@@ -350,7 +391,7 @@ Can be invoked via `.venv/bin/python -m src.main`, `.venv/bin/lom-translate`, or
 
 #### Improvement Mode
 
-Refines an existing raw translation directory (`-rd` / `--raw-dir`) against the Chinese source (`-id` / `--input-dir`) using task `improve`:
+Refines an existing raw translation directory (`-rd` / `--raw-dir`) against the Chinese source (`-id` / `--input-dir`) using task `improve` (and runs pre-flight glossary auto-check & sync automatically unless `--no-auto-glossary` or `auto_sync_glossary = false`):
 
 ```bash
 .venv/bin/python -m src.main \
@@ -371,18 +412,19 @@ Refines an existing raw translation directory (`-rd` / `--raw-dir`) against the 
 | Short | Long | Description |
 | --- | --- | --- |
 | `-c` | `--config-file` | Path to TOML config file (default: `LOM_CONFIG_FILE` env var or `config.toml`) |
-| `-m` | `--mode` | Execution mode: `translate` or `improve` (default: `[run].mode`) |
+| `-m` | `--mode` | Execution mode: `translate`, `improve`, or `glossary` (default: `[run].mode`) |
 | `-id` | `--input-dir` | Input directory of source JSON files (default: `[run].input_dir`) |
-| `-od` | `--output-dir` | Base output directory (default: `[run].output_dir`) |
+| `-od` | `--output-dir` | Base output directory (default: `[run].output_dir`; unused in `glossary` mode) |
 | `-rd` | `--raw-dir` | Raw translations directory (required in `improve` mode unless set in `[run].raw_dir`) |
 | `-jod` | `--json-output-dir` | Per-file JSON output directory (default: `<output_dir>/json`) |
 | `-dod` | `--details-output-dir` | `translation_details.json` output directory (default: `<output_dir>/details`) |
 | `-pod` | `--pairs-output-dir` | `translation_pairs.txt` output directory (default: `<output_dir>/pairs`) |
-| `-gf` | `--glossary-file` | Specific glossary `.json` or `.txt` file (default: all `*.json` in `[run].glossary_dir`) |
-| `-old` | `--old-dir` | Directory of previously translated JSONs for cache reuse (mutually exclusive with `-olf`) |
-| `-olf` | `--old-file` | Single previous JSON/details file for cache reuse (mutually exclusive with `-old`) |
-| `-ff` | `--flowchart-file` | Path to `story_flowchart.json` for story dialogue ordering & context (optional, overrides `[run].flowchart_file`) |
-| `-rf` | `--relationship-file` | Path to `relationship_matrix.json` for character *xưng hô* rules (optional, overrides `[run].relationship_file`) |
+| `-gf` | `--glossary-file` | Specific glossary `.json` or `.txt` file (auto-created/synced when auto-sync is active; default: all `*.json` in `[run].glossary_dir`, synced to `<glossary_dir>/glossary.json` & `.txt`) |
+| — | `--no-auto-glossary` | Skip automatic pre-flight glossary check and sync before `translate`/`improve` runs |
+| `-old` | `--old-dir` | Optional directory of previously translated JSONs for entry cache reuse (mutually exclusive with `-olf`; not needed for glossary creation/sync) |
+| `-olf` | `--old-file` | Optional single previous JSON/details file for entry cache reuse (mutually exclusive with `-old`) |
+| `-ff` | `--flowchart-file` | Path to `story_flowchart.json` for story dialogue ordering & context (optional, overrides `[run].flowchart_file`; character `vi_name` synced during auto-glossary) |
+| `-rf` | `--relationship-file` | Path to `relationship_matrix.json` for character *xưng hô* rules (optional, overrides `[run].relationship_file`; character `vi_name` synced during auto-glossary) |
 | `-dw` | `--dialogue-window` | Preceding dialogue turns in sliding context window (integer `>= 0`, overrides `[run].dialogue_window`, default `4`) |
 | — | `--provider` | Override primary provider route from `config.toml` |
 | — | `--tier` | Override primary route tier from `config.toml` |
@@ -391,7 +433,7 @@ Refines an existing raw translation directory (`-rd` / `--raw-dir`) against the 
 ### 4. Utility Scripts (`tool/`)
 
 #### 1. `tool/create_glossary.py`
-Aggregates matching `ChineseSimplified` original and translated JSON folders into both a JSON glossary and a deduplicated TXT glossary (skipping dialogue/description keys).
+Optional legacy helper that aggregates matching `ChineseSimplified` original and already-translated JSON folders into both a JSON glossary and a deduplicated TXT glossary (skipping dialogue/description keys). For generating or syncing glossaries directly from source JSONs without a pre-translated folder, prefer `.venv/bin/lom-translate -m glossary` (or automatic pre-flight sync).
 
 ```bash
 .venv/bin/python tool/create_glossary.py \
@@ -517,6 +559,7 @@ Standalone CLIs for regenerating `story_flowchart.json` from `Mortal_Data/` and 
 ### Phase 2 — Translation Quality & Throughput *(Partially Implemented)*
 - **Zero-UABEA Unity Asset Unpack & Repack** *(Completed)*: Direct Unity 2020.3.49f1 (v22) `LeanLanguageCSV` extraction (`lom-unpack-game`) and patch building/installation/restore (`lom-patch-game`).
 - **Sliding-Window Dialogue Context & Relationship Matrix (`Story/`)** *(Completed)*: Lua script flowchart extraction (`story_flowchart.py`), wuxia Vietnamese *xưng hô* rules (`relationship_matrix.py`), script-ordered execution with live `prev_lines` (`Original => Translated`) + `next_lines` lookahead, context-safe `{Name}::{Original}` caching, and `CONTEXT_AWARE_IMPROVE_RULE_PROMPT`.
+- **Pre-Flight Glossary Auto-Check & Sync (`-m glossary` / `auto_sync_glossary`)** *(Completed)*: Structured 4-category extraction with paired context, 3-way sync (in-sync preservation, outdated `Original` invalidation, wave-ordered missing-term LLM translation), UTF-8 JSON/TXT persistence, and automatic character `vi_name` sync across `story_flowchart.json` and `relationship_matrix.json`.
 - **Multi-Entry Batching**: Batch short UI/item/skill strings into structured multi-item prompts to cut API overhead and improve throughput.
 - **Category-Aware Task Routing**: Route different entry categories (`Story/` vs `UI` / `LegendInfo`) to distinct `[tasks.*]` profiles (e.g., stronger literary model for `Story/`, faster model for short UI labels).
 - **Fast Glossary Matching**: Replace linear substring scan in `find_original_matches` with an Aho-Corasick automaton or compiled regex matcher for large glossaries.

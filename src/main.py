@@ -11,7 +11,11 @@ from tqdm.asyncio import tqdm as async_tqdm
 
 from src.config import VALID_MODES, load_config
 from src.file_processor import process_json_file
-from src.glossary import load_glossary_async, load_old_translations_async
+from src.glossary import (
+    autocheck_and_sync_glossary,
+    load_glossary_async,
+    load_old_translations_async,
+)
 from src.logger import logger
 from src.translator import TranslationEngine
 from src.utils import postprocess_text
@@ -215,6 +219,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to a specific glossary file (optional)",
     )
     parser.add_argument(
+        "--no-auto-glossary",
+        action="store_true",
+        help="Skip automatic pre-flight glossary check and sync before translate/improve runs",
+    )
+    parser.add_argument(
         "--old-dir",
         "-old",
         default=None,
@@ -323,47 +332,91 @@ async def main_async(argv: list[str] | None = None) -> None:
     if not json_dir.is_dir() or not any(json_dir.glob("*.json")):
         parser.error(f"Input directory not found or contains no JSON files: {json_dir}")
 
-    raw_dir = Path(raw_dir_arg) if raw_dir_arg else None
+    raw_dir = Path(raw_dir_arg) if (raw_dir_arg and mode != "glossary") else None
     if raw_dir and not raw_dir.is_dir():
         parser.error(f"Raw translations directory not found: {raw_dir}")
 
+    route_task = (
+        ("improve_glossary" if "improve_glossary" in config.tasks else "translate")
+        if mode == "glossary"
+        else mode
+    )
     try:
         routes, _ = config.resolve_task_routes(
-            mode,
+            route_task,
             provider=args.provider,
             tier=args.tier,
             model=args.model,
         )
     except ValueError as exc:
-        parser.error(f"Invalid route configuration for task '{mode}': {exc}")
+        parser.error(f"Invalid route configuration for task '{route_task}': {exc}")
 
     if not routes:
-        parser.error(f"No routes configured for task '{mode}'.")
+        parser.error(f"No routes configured for task '{route_task}'.")
+
+    auto_sync_active = mode == "glossary" or (
+        run_cfg.auto_sync_glossary and not args.no_auto_glossary
+    )
+    glossary_task = (
+        "improve_glossary"
+        if "improve_glossary" in config.tasks
+        else ("translate" if "translate" in config.tasks else mode)
+    )
+    glossary_max_concurrent = routes[0].max_concurrent
+    if auto_sync_active:
+        if glossary_task == route_task:
+            glossary_routes = routes
+        else:
+            try:
+                glossary_routes, _ = config.resolve_task_routes(
+                    glossary_task,
+                    provider=args.provider,
+                    tier=args.tier,
+                    model=args.model,
+                )
+            except ValueError:
+                glossary_task = route_task
+                glossary_routes = routes
+        if glossary_routes:
+            glossary_max_concurrent = glossary_routes[0].max_concurrent
 
     # Enable file logging only after CLI parsing and validation succeed
     logger.enable_file_logging()
 
-    # --- Setup Output Directories ---
+    # --- Setup Output Directories (skipped in glossary-only mode) ---
     base_output_dir = Path(output_dir)
     json_output_dir = Path(json_output_dir_arg or base_output_dir / "json")
     details_output_dir = Path(details_output_dir_arg or base_output_dir / "details")
     pairs_output_dir = Path(pairs_output_dir_arg or base_output_dir / "pairs")
-    for dir_path in [json_output_dir, details_output_dir, pairs_output_dir]:
-        dir_path.mkdir(parents=True, exist_ok=True)
+    if mode != "glossary":
+        for dir_path in [json_output_dir, details_output_dir, pairs_output_dir]:
+            dir_path.mkdir(parents=True, exist_ok=True)
 
     # --- Logging ---
-    logger.info(f"Starting translation in '{mode}' mode.")
-    logger.info(f"Task '{mode}' routes: {', '.join(route.route_label for route in routes)}")
-    logger.info(f"Input directory: {json_dir}")
-    logger.info(f"Output directories: {base_output_dir}/(json, details, pairs)")
-    if raw_dir:
-        logger.info(f"Improve mode raw translations directory: {raw_dir}")
+    if mode == "glossary":
+        logger.info("Starting glossary check and sync in 'glossary' mode.")
+        logger.info(
+            f"Task '{route_task}' routes: {', '.join(route.route_label for route in routes)}"
+        )
+        logger.info(f"Input directory: {json_dir}")
+    else:
+        logger.info(f"Starting translation in '{mode}' mode.")
+        logger.info(
+            f"Task '{route_task}' routes: {', '.join(route.route_label for route in routes)}"
+        )
+        logger.info(f"Input directory: {json_dir}")
+        logger.info(f"Output directories: {base_output_dir}/(json, details, pairs)")
+        if raw_dir:
+            logger.info(f"Improve mode raw translations directory: {raw_dir}")
     if glossary_file:
         logger.info(f"Using glossary file: {glossary_file}")
-    if old_dir:
-        logger.info(f"Using old translations cache directory: {old_dir}")
-    if old_file:
-        logger.info(f"Using old translations cache file: {old_file}")
+    else:
+        logger.info(f"Using glossary directory: {run_cfg.glossary_dir}")
+    if mode != "glossary":
+        if old_dir:
+            logger.info(f"Using old translations cache directory: {old_dir}")
+        if old_file:
+            logger.info(f"Using old translations cache file: {old_file}")
 
     flowchart = None
     if flowchart_file_arg:
@@ -419,35 +472,81 @@ async def main_async(argv: list[str] | None = None) -> None:
 
     run_start = time.time()
 
-    # --- Asynchronous Data Loading ---
-    tasks = {
-        "glossary": load_glossary_async(glossary_file, glossary_dir=run_cfg.glossary_dir),
-        "translation_cache": None,
-    }
-    if old_dir:
-        tasks["translation_cache"] = load_old_translations_async(input_dir, old_dir)
-    elif old_file:
-        tasks["translation_cache"] = load_glossary_async(
-            old_file, glossary_dir=run_cfg.glossary_dir
+    engine = TranslationEngine(config)
+    glossary_text: dict[str, str] = {}
+    translation_cache: dict[str, str] = {}
+
+    if auto_sync_active:
+        logger.info(
+            f"Running pre-flight glossary check & sync (task '{glossary_task}', "
+            f"max_concurrent={glossary_max_concurrent})..."
+        )
+        _, synced_orig_to_translated, sync_stats = await autocheck_and_sync_glossary(
+            input_dir=json_dir,
+            glossary_file_path=glossary_file,
+            glossary_dir=run_cfg.glossary_dir,
+            engine=engine,
+            flowchart=flowchart,
+            flowchart_file=flowchart_file_arg,
+            relationship_matrix=relationship_matrix,
+            relationship_file=relationship_file_arg,
+            task_name=glossary_task,
+            override_provider=args.provider,
+            override_tier=args.tier,
+            override_model=args.model,
+            max_concurrent=glossary_max_concurrent,
+        )
+        glossary_text = synced_orig_to_translated
+        logger.info(
+            "Glossary sync summary: "
+            f"candidates={sync_stats['total_candidates']}, "
+            f"in_sync={sync_stats['in_sync']}, "
+            f"reused={sync_stats['reused']}, "
+            f"outdated_updated={sync_stats['outdated_updated']}, "
+            f"new_translated={sync_stats['new_translated']}, "
+            f"failed={sync_stats['failed']}, "
+            f"flowchart_updated={sync_stats['flowchart_updated']}, "
+            f"matrix_updated={sync_stats['matrix_updated']}"
         )
 
-    results = await asyncio.gather(*[task for task in tasks.values() if task is not None])
+        if mode == "glossary":
+            run_end = time.time()
+            target_glossary = glossary_file or str(Path(run_cfg.glossary_dir) / "glossary.json")
+            logger.info(
+                f"Glossary mode completed in {run_end - run_start:.2f}s. "
+                f"Active glossary terms: {len(glossary_text)} (target: {target_glossary})."
+            )
+            return
 
-    _, glossary_text = results[0]
-    translation_cache = {}
-    if len(results) > 1:
-        if old_file:
-            _, translation_cache = results[1]
-        else:
-            translation_cache = results[1]
+    # --- Asynchronous Data Loading ---
+    data_tasks = []
+    if not auto_sync_active:
+        data_tasks.append(
+            ("glossary", load_glossary_async(glossary_file, glossary_dir=run_cfg.glossary_dir))
+        )
+    if old_dir:
+        data_tasks.append(("old_dir", load_old_translations_async(input_dir, old_dir)))
+    elif old_file:
+        data_tasks.append(
+            ("old_file", load_glossary_async(old_file, glossary_dir=run_cfg.glossary_dir))
+        )
 
-    if glossary_text:
+    if data_tasks:
+        results = await asyncio.gather(*[coro for _, coro in data_tasks])
+        for (key, _), result in zip(data_tasks, results, strict=True):
+            if key == "glossary":
+                _, glossary_text = result
+            elif key == "old_file":
+                _, translation_cache = result
+            elif key == "old_dir":
+                translation_cache = result
+
+    if not auto_sync_active and glossary_text:
         logger.info(f"Loaded {len(glossary_text)} glossary entries.")
     if translation_cache:
         logger.info(f"Loaded {len(translation_cache)} old translation pairs for cache.")
 
     # --- File Processing Pipeline ---
-    engine = TranslationEngine(config)
     all_data_dict = []
     translation_pairs: OrderedDict[str, str] = OrderedDict()
     run_stats = {

@@ -7,7 +7,12 @@ from typing import Any, Self
 
 from pydantic import BaseModel, Field
 
-from src.story_flowchart import CharacterInfo, StoryFlowchart
+from src.story_flowchart import (
+    ANONYMOUS_CHARACTER_NAMES,
+    CharacterInfo,
+    StoryFlowchart,
+    resolve_character_vi_name,
+)
 
 
 class PronounRule(BaseModel):
@@ -710,3 +715,60 @@ def build_matrix_from_flowchart(
         archetypes=dict(DEFAULT_ARCHETYPES),
         pairs=pairs,
     )
+
+
+def sync_matrix_characters(
+    matrix: RelationshipMatrix,
+    flowchart: StoryFlowchart | None,
+    name_to_translated: dict[str, str],
+    original_to_translated: dict[str, str],
+) -> int:
+    """Update ``matrix.characters[cid]['vi_name']`` and add missing characters from ``flowchart``."""
+    changed = 0
+    if flowchart is not None:
+        for cid, cinfo in flowchart.characters.items():
+            existing = matrix.characters.get(cid)
+            lookup_zh = cinfo.zh_name or (str(existing.get("zh_name") or "") if existing else "")
+            resolved_vi = resolve_character_vi_name(
+                cid,
+                lookup_zh,
+                name_to_translated,
+                original_to_translated,
+            )
+            if (
+                not resolved_vi
+                and cinfo.vi_name
+                and cinfo.vi_name != lookup_zh
+                and cinfo.vi_name not in ANONYMOUS_CHARACTER_NAMES
+            ):
+                resolved_vi = cinfo.vi_name
+
+            if existing is None:
+                matrix.characters[cid] = {
+                    "char_id": cid,
+                    "zh_name": cinfo.zh_name,
+                    "zh_title": cinfo.zh_title,
+                    "vi_name": resolved_vi,
+                    "gender": cinfo.gender,
+                    "traits": cinfo.traits,
+                }
+                changed += 1
+            elif resolved_vi and resolved_vi != (existing.get("vi_name") or ""):
+                existing["vi_name"] = resolved_vi
+                changed += 1
+
+    for cid, entry in matrix.characters.items():
+        if flowchart is not None and cid in flowchart.characters:
+            continue
+        zh_name = str(entry.get("zh_name") or "")
+        resolved_vi = resolve_character_vi_name(
+            cid,
+            zh_name,
+            name_to_translated,
+            original_to_translated,
+        )
+        if resolved_vi and resolved_vi != (entry.get("vi_name") or ""):
+            entry["vi_name"] = resolved_vi
+            changed += 1
+
+    return changed

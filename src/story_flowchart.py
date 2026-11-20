@@ -13,6 +13,9 @@ LEAN_CSV_SIG = (
     b"\x03\x00\x00\x00 = \x00\x02\x00\x00\x00\\n\x00\x00\x04\x00\x00\x00 // \x00\x00\x00\x00"
 )
 STORY_KEY_PREFIX = "Story/"
+ANONYMOUS_CHARACTER_NAMES: frozenset[str] = frozenset(
+    {"？？？", "???", "蒙面人", "少女", "玄衣少年", "斗笠人", "商人", ""}
+)
 
 CURATED_CHARACTERS: dict[str, dict[str, str]] = {
     "player": {
@@ -961,7 +964,7 @@ def _infer_gender_from_info(char_id: str, zh_name: str, zh_title: str) -> str:
 def _resolve_curated_base(char_id: str, zh_name: str) -> dict[str, str] | None:
     if char_id in CURATED_CHARACTERS:
         return CURATED_CHARACTERS[char_id]
-    if zh_name in ("？？？", "???", "蒙面人", "少女", "玄衣少年", "斗笠人", "商人", ""):
+    if zh_name in ANONYMOUS_CHARACTER_NAMES:
         return None
     base_id = char_id.split("_", 1)[0]
     if base_id in CURATED_CHARACTERS and base_id not in ("player", "narrative"):
@@ -969,6 +972,47 @@ def _resolve_curated_base(char_id: str, zh_name: str) -> dict[str, str] | None:
     if char_id.startswith("player_"):
         return CURATED_CHARACTERS["player"]
     return None
+
+
+def resolve_character_vi_name(
+    char_id: str,
+    zh_name: str,
+    name_to_translated: dict[str, str],
+    original_to_translated: dict[str, str],
+) -> str:
+    """Resolve the Vietnamese name for a character ID from glossary lookup maps."""
+    candidates: list[str | None] = [
+        name_to_translated.get(f"Character/{char_id}"),
+        name_to_translated.get(f"CombatCharacter/Name/{char_id}"),
+    ]
+    if zh_name not in ANONYMOUS_CHARACTER_NAMES:
+        candidates.append(original_to_translated.get(zh_name))
+
+    for raw_val in candidates:
+        cleaned = (raw_val or "").strip()
+        if cleaned and cleaned != zh_name and cleaned not in ANONYMOUS_CHARACTER_NAMES:
+            return cleaned
+    return ""
+
+
+def sync_characters_from_glossary(
+    flowchart: StoryFlowchart,
+    name_to_translated: dict[str, str],
+    original_to_translated: dict[str, str],
+) -> int:
+    """Update ``cinfo.vi_name`` across ``flowchart.characters`` from glossary mappings."""
+    updated = 0
+    for cid, cinfo in flowchart.characters.items():
+        new_vi = resolve_character_vi_name(
+            cid,
+            cinfo.zh_name,
+            name_to_translated,
+            original_to_translated,
+        )
+        if new_vi and new_vi != cinfo.vi_name:
+            cinfo.vi_name = new_vi
+            updated += 1
+    return updated
 
 
 def _build_characters_catalog(

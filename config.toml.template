@@ -3,10 +3,11 @@
 # Every provider + tier supports comma-separated multi-key rotation via `api_key_env` in `.env`.
 
 [run]
-mode = "translate"
+mode = "translate"  # supports "translate", "improve", "glossary"
 input_dir = "Resource/LeanLocalJson"
 output_dir = "translated_output"
 glossary_dir = "Resource/glossary"
+auto_sync_glossary = true
 max_concurrent_file_opens = 100
 
 # Optional path overrides (uncomment as needed; CLI flags override these values)
